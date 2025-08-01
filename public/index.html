@@ -30,6 +30,7 @@
         SuiRaffle 🎟️
       </div>
       <div id="countdown" class="countdown">Next draw in: --:--:--</div>
+      <!-- Last winner banner always visible if set -->
       <div id="winnerAnnouncement" class="winner-banner hidden"></div>
       <div class="flex-1"></div>
     </div>
@@ -63,21 +64,21 @@
         <ul id="entriesList" class="entries-list"></ul>
       </div>
 
-      <!-- NEW: Buy Raffle Tokens Button -->
-      <div class="mt-4">
-        <a href="https://moonbags.io/bondingcurve/coins/sui-raffle-sui-VvyRVXFykG"
+      <!-- Draw & Withdraw Controls -->
+      <div class="mt-4 flex flex-col gap-2">
+        <button id="drawBtn" class="btn btn-danger">Draw Winner</button>
+        <a id="withdrawBtn"
+           href="https://moonbags.io/bondingcurve/coins/sui-raffle-sui-VvyRVXFykG"
            target="_blank"
-           class="btn btn-primary">
-          Buy Raffle Tokens
+           class="btn btn-success hidden"
+        >
+          Withdraw My Winnings
         </a>
       </div>
-
-      <button id="drawBtn" class="btn btn-danger mt-4">Draw Winner</button>
 
       <!-- Latest Tweet Embed under Draw Winner -->
       <section class="mt-8 text-center">
         <h3 class="text-xl font-semibold mb-4">Latest Tweet by @sui_raffle</h3>
-        <!-- Replace STATUS_ID below with the actual tweet ID -->
         <blockquote class="twitter-tweet">
           <a href="https://twitter.com/sui_raffle/status/STATUS_ID"></a>
         </blockquote>
