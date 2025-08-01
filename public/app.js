@@ -20,7 +20,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const DECIMALS          = 10 ** 6;             // RAF has 6 decimals
   const TOKENS_PER_TICKET = 1_000_000;           // 1,000,000 RAF per ticket
   const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
-  const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
   let jwtToken            = null;
   let currentWinner       = null;
 
@@ -139,9 +138,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const jr = await res.json();
     console.log('💬 /api/balance body:', jr);
 
-    // 3) Find RAF entry by substring match
-    const arr  = Array.isArray(jr.result) ? jr.result : [];
-    const coin = arr.find(c => c.coinType.includes(RAF_TYPE));
+    // 3) Find the RAF entry (case-insensitive substring match)
+    const arr = Array.isArray(jr.result) ? jr.result : [];
+    const rafEntries = arr.filter(c =>
+      c.coinType.toLowerCase().includes('::raf::raf')
+    );
+    console.log('🔍 RAF entries found:', rafEntries);
+    const coin = rafEntries[0];
     const raw  = coin ? Number(coin.totalBalance) : 0;
 
     // 4) Update UI
