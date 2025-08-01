@@ -75,8 +75,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function getNextDraw() {
     const now = new Date();
-    const hours = [18,19,20,21,22,23];
-    return hours
+    return [18,19,20,21,22,23]
       .map(h => {
         const d = new Date(now);
         d.setHours(h,0,0,0);
@@ -87,12 +86,8 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function startCountdown() {
     function update() {
-      const next = getNextDraw();
-      const diff = next - Date.now();
-      if (diff <= 0) {
-        loadEntries();
-        return;
-      }
+      const diff = getNextDraw() - Date.now();
+      if (diff <= 0) { loadEntries(); return; }
       const hrs  = String(Math.floor(diff/3600000)).padStart(2,'0');
       const mins = String(Math.floor((diff%3600000)/60000)).padStart(2,'0');
       const secs = String(Math.floor((diff%60000)/1000)).padStart(2,'0');
@@ -130,10 +125,8 @@ document.addEventListener('DOMContentLoaded', () => {
     authBtn.textContent = 'Authenticated';
     authBtn.disabled = true;
 
-    // Debug logs
-    console.log('👉 token:', jwtToken);
-
     // 2) Fetch balance via proxy
+    console.log('👉 Fetching balance with token:', jwtToken);
     balanceMsg.textContent = '⏳ Fetching balance…';
     res = await fetch('/api/balance', {
       method: 'POST',
@@ -146,9 +139,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const jr = await res.json();
     console.log('💬 /api/balance body:', jr);
 
-    // 3) Compute tickets
+    // 3) Find RAF entry by substring match
     const arr  = Array.isArray(jr.result) ? jr.result : [];
-    const coin = arr.find(c => c.coinType === RAF_TYPE);
+    const coin = arr.find(c => c.coinType.includes(RAF_TYPE));
     const raw  = coin ? Number(coin.totalBalance) : 0;
 
     // 4) Update UI
@@ -197,8 +190,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // ─── POLLING & INIT ─────────────────────────
-  setInterval(loadEntries, 60_000);
+  // ─── INIT ─────────────────────────────────────
+  setInterval(loadEntries, 60000);
   loadEntries();
   updateLastWinners();
   startCountdown();
