@@ -21,15 +21,15 @@ if (!JWT_SECRET || !ADMIN_KEY) {
 }
 
 // Sui & RAF constants
-const FULLNODE_URL       = 'https://fullnode.mainnet.sui.io:443';
-const RAF_TYPE           = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
-const DECIMALS           = 10 ** 6;          // RAF has 6 decimals
-const TOKENS_PER_TICKET  = 1_000_000;        // 1 000 000 RAF per ticket
-const MICROS_PER_TICKET  = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
+const FULLNODE_URL      = 'https://fullnode.mainnet.sui.io:443';
+const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
+const DECIMALS          = 10 ** 6;          // RAF has 6 decimals
+const TOKENS_PER_TICKET = 1_000_000;        // 1,000,000 RAF per ticket
+const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
 
 // ─── STORAGE HELPERS ─────────────────────────
 if (!fs.existsSync(DATA_FILE)) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify({ entries: [] }, null, 2));
+  fs.writeFileSync(DATA_FILE, JSON.stringify({ entries: [], lastWinner: null }, null, 2));
 }
 function loadData() {
   return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
@@ -64,7 +64,7 @@ function authenticate(req, res, next) {
 
 // ─── ROUTES ──────────────────────────────────
 
-// 1️⃣ Issue a JWT for a valid Sui address
+// Issue a JWT for a valid Sui address
 app.post('/api/auth', (req, res) => {
   const { address } = req.body;
   if (!address || !isValidSuiAddress(address)) {
@@ -74,45 +74,42 @@ app.post('/api/auth', (req, res) => {
   res.json({ token });
 });
 
-// 2️⃣ Enter the raffle with a given ticket count
+// Enter the raffle with a given ticket count
 app.post('/api/enter', authenticate, (req, res) => {
   const { address: bodyAddr, count } = req.body;
   const addr = req.user.address;
-  if (bodyAddr !== addr) {
-    return res.status(400).json({ error: 'Address mismatch' });
-  }
-  if (!Number.isInteger(count) || count < 1) {
-    return res.status(400).json({ error: 'Invalid ticket count' });
-  }
+  if (bodyAddr !== addr) return res.status(400).json({ error: 'Address mismatch' });
+  if (!Number.isInteger(count) || count < 1) return res.status(400).json({ error: 'Invalid ticket count' });
 
   const db = loadData();
-  if (db.entries.find(e => e.address === addr)) {
+  if (db.entries.find(e => e.address === addr))
     return res.status(400).json({ error: 'Already entered this round' });
-  }
 
   db.entries.push({ address: addr, count });
-  saveData(db);
-
-  const totalTickets = db.entries.reduce((sum, e) => sum + e.count, 0);
-  res.json({ success: true, total: totalTickets });
+  saveData({ entries: db.entries, lastWinner: db.lastWinner });
+  res.json({ success: true, total: db.entries.reduce((sum, e) => sum + e.count, 0) });
 });
 
-// 3️⃣ List entries
+// List stored entries
 app.get('/api/entries', (req, res) => {
-  // Return stored entry counts without recalculation
   const db = loadData();
   res.json({ entries: db.entries });
 });
 
-// 4️⃣ Draw a ticket-weighted winner and reset entries
-app.post('/api/draw', (req, res) => {
-  if (req.headers['x-admin-key'] !== ADMIN_KEY) {
-    return res.status(403).json({ error: 'Forbidden' });
-  }
+// Get last winner
+app.get('/api/last-winner', (req, res) => {
   const db = loadData();
-  if (db.entries.length === 0) {
+  res.json({ lastWinner: db.lastWinner });
+});
+
+// Draw a ticket-weighted winner, reset entries, persist lastWinner
+app.post('/api/draw', (req, res) => {
+  if (req.headers['x-admin-key'] !== ADMIN_KEY)
+    return res.status(403).json({ error: 'Forbidden' });
+
+  const db = loadData();
+  if (db.entries.length === 0)
     return res.status(400).json({ error: 'No entries this round' });
-  }
 
   const weighted = [];
   db.entries.forEach(e => {
@@ -120,15 +117,12 @@ app.post('/api/draw', (req, res) => {
   });
   const winner = weighted[Math.floor(Math.random() * weighted.length)];
 
-  // Reset entries immediately after draw
-  saveData({ entries: [] });
-
+  saveData({ entries: [], lastWinner: winner });
   res.json({ winner });
 });
 
-// 5️⃣ Auto-draw & reset every 12h at 06:00 & 18:00 starting 2025-08-01
-cron.schedule('0 6,18 * * *', () => {
-  if (new Date() < new Date('2025-08-01T06:00:00')) return;
+// Auto-draw & reset hourly 18-23
+cron.schedule('0 18-23 * * *', () => {
   const db = loadData();
   if (!db.entries.length) return;
 
@@ -139,16 +133,16 @@ cron.schedule('0 6,18 * * *', () => {
   const winner = weighted[Math.floor(Math.random() * weighted.length)];
   console.log('🏆 Auto draw winner:', winner);
 
-  saveData({ entries: [] });
+  saveData({ entries: [], lastWinner: winner });
 });
 
-// 6️⃣ Global error handler
+// Global error handler
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// ▶️ Start server
+// Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });

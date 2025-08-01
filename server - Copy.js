@@ -127,7 +127,7 @@ app.post('/api/draw', (req, res) => {
 });
 
 // 5️⃣ Auto-draw & reset every 12h at 06:00 & 18:00 starting 2025-08-01
-cron.schedule('0 6,18 * * *', () => {
+cron.schedule('0 18-23 * * *', () => {
   if (new Date() < new Date('2025-08-01T06:00:00')) return;
   const db = loadData();
   if (!db.entries.length) return;
