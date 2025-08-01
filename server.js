@@ -22,7 +22,7 @@ if (!JWT_SECRET || !ADMIN_KEY) {
 
 // Sui & RAF constants
 const FULLNODE_URL      = 'https://fullnode.mainnet.sui.io:443';
-const SEWEY_TYPE        = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
+const RAF_TYPE        = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
 const DECIMALS          = 1e6;                // RAF has 6 decimals
 const TOKENS_PER_TICKET = 1_000_000;          // 1 000 000 RAF per ticket
 const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
