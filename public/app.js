@@ -17,9 +17,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ─── CONFIG ───────────────────────────────────
-  const DECIMALS          = 10 ** 6;           // RAF has 6 decimals
-  const TOKENS_PER_TICKET = 1_000_000;         // 1,000,000 RAF per ticket
+  const DECIMALS          = 10 ** 6;            // RAF has 6 decimals
+  const TOKENS_PER_TICKET = 1_000_000;          // 1,000,000 RAF per ticket
   const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
+  const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
   let jwtToken = null;
   let currentWinner = null;
 
@@ -125,7 +126,7 @@ document.addEventListener('DOMContentLoaded', () => {
     authBtn.textContent = 'Authenticated';
     authBtn.disabled = true;
 
-    // 2) Fetch balance via proxy
+    // 2) Fetch balance via your server proxy
     balMsg.textContent = '⏳ Fetching balance…';
     res = await fetch('/api/balance', {
       method:'POST',
