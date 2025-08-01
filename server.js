@@ -14,18 +14,16 @@ const PORT       = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET;
 const ADMIN_KEY  = process.env.ADMIN_KEY;
 const DATA_FILE  = process.env.DATA_FILE || './entries.json';
+const FULLNODE_URL      = 'https://fullnode.mainnet.sui.io:443';
+const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
+const DECIMALS          = 10 ** 6;
+const TOKENS_PER_TICKET = 1_000_000;
+const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS;
 
 if (!JWT_SECRET || !ADMIN_KEY) {
   console.error('❌ Missing JWT_SECRET or ADMIN_KEY in .env');
   process.exit(1);
 }
-
-// Sui & RAF constants
-const FULLNODE_URL      = 'https://fullnode.mainnet.sui.io:443';
-const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
-const DECIMALS          = 10 ** 6;          // RAF has 6 decimals
-const TOKENS_PER_TICKET = 1_000_000;        // 1,000,000 RAF per ticket
-const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
 
 // ─── STORAGE HELPERS ─────────────────────────
 if (!fs.existsSync(DATA_FILE)) {
@@ -74,6 +72,28 @@ app.post('/api/auth', (req, res) => {
   res.json({ token });
 });
 
+// Proxy Sui RPC for balance checks (avoids CORS/429 in browser)
+app.post('/api/balance', authenticate, async (req, res) => {
+  const address = req.user.address;
+  try {
+    const rpcRes = await fetch(FULLNODE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'suix_getAllBalances',
+        params: [address],
+      }),
+    });
+    const jr = await rpcRes.json();
+    res.json(jr);
+  } catch (err) {
+    console.error(err);
+    res.status(502).json({ error: 'Fullnode RPC failed' });
+  }
+});
+
 // Enter the raffle with a given ticket count
 app.post('/api/enter', authenticate, (req, res) => {
   const { address: bodyAddr, count } = req.body;
@@ -102,7 +122,7 @@ app.get('/api/last-winner', (req, res) => {
   res.json({ lastWinner: db.lastWinner });
 });
 
-// Draw a ticket-weighted winner, reset entries, persist lastWinner
+// Draw a ticket-weighted winner, reset entries
 app.post('/api/draw', (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY)
     return res.status(403).json({ error: 'Forbidden' });
@@ -111,25 +131,23 @@ app.post('/api/draw', (req, res) => {
   if (db.entries.length === 0)
     return res.status(400).json({ error: 'No entries this round' });
 
-  const weighted = [];
-  db.entries.forEach(e => {
-    for (let i = 0; i < e.count; i++) weighted.push(e.address);
-  });
+  const weighted = db.entries
+    .filter(e => e.count > 0)
+    .flatMap(e => Array(e.count).fill(e.address));
   const winner = weighted[Math.floor(Math.random() * weighted.length)];
 
   saveData({ entries: [], lastWinner: winner });
   res.json({ winner });
 });
 
-// Auto-draw & reset hourly 18-23
+// Auto-draw & reset hourly 18–23
 cron.schedule('0 18-23 * * *', () => {
   const db = loadData();
   if (!db.entries.length) return;
 
-  const weighted = [];
-  db.entries.forEach(e => {
-    for (let i = 0; i < e.count; i++) weighted.push(e.address);
-  });
+  const weighted = db.entries
+    .filter(e => e.count > 0)
+    .flatMap(e => Array(e.count).fill(e.address));
   const winner = weighted[Math.floor(Math.random() * weighted.length)];
   console.log('🏆 Auto draw winner:', winner);
 

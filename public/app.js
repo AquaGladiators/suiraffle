@@ -17,8 +17,6 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ─── CONFIG ───────────────────────────────────
-  const FULLNODE_URL      = 'https://fullnode.mainnet.sui.io:443';
-  const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
   const DECIMALS          = 10 ** 6;           // RAF has 6 decimals
   const TOKENS_PER_TICKET = 1_000_000;         // 1,000,000 RAF per ticket
   const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
@@ -127,19 +125,17 @@ document.addEventListener('DOMContentLoaded', () => {
     authBtn.textContent = 'Authenticated';
     authBtn.disabled = true;
 
-    // 2) Fetch balance
+    // 2) Fetch balance via proxy
     balMsg.textContent = '⏳ Fetching balance…';
-    res = await fetch(FULLNODE_URL, {
+    res = await fetch('/api/balance', {
       method:'POST',
-      headers:{ 'Content-Type':'application/json' },
-      body: JSON.stringify({
-        jsonrpc:'2.0', id:1,
-        method:'suix_getAllBalances',
-        params:[ address ]
-      })
+      headers:{
+        'Content-Type':'application/json',
+        'Authorization':'Bearer ' + jwtToken
+      }
     });
     const jr = await res.json();
-    const arr = Array.isArray(jr.result) ? jr.result : [];
+    const arr  = Array.isArray(jr.result) ? jr.result : [];
     const coin = arr.find(c => c.coinType === RAF_TYPE);
     const raw  = coin ? Number(coin.totalBalance) : 0;
 
