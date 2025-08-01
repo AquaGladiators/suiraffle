@@ -1,4 +1,5 @@
 // server.js
+
 require('dotenv').config();
 const express = require('express');
 const path = require('path');
@@ -40,9 +41,8 @@ function saveData(db) {
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── UTILITIES ───────────────────────────────
+// ─── UTILITIES & MIDDLEWARE ───────────────────
 function isValidSuiAddress(addr) {
   return typeof addr === 'string' && /^0x[a-fA-F0-9]{64}$/.test(addr);
 }
@@ -62,17 +62,21 @@ function authenticate(req, res, next) {
 
 // ─── ROUTES ──────────────────────────────────
 
-// Issue a JWT for a valid Sui address
+// 1) Issue a JWT for a valid Sui address
 app.post('/api/auth', (req, res) => {
   const { address } = req.body;
   if (!address || !isValidSuiAddress(address)) {
     return res.status(400).json({ error: 'Invalid Sui address' });
   }
-  const token = jwt.sign({ address: normalizeSuiAddress(address) }, JWT_SECRET, { expiresIn: '1h' });
+  const token = jwt.sign(
+    { address: normalizeSuiAddress(address) },
+    JWT_SECRET,
+    { expiresIn: '1h' }
+  );
   res.json({ token });
 });
 
-// Proxy Sui RPC for balance checks (avoids CORS/429 in browser)
+// 2) Proxy Sui RPC for balance checks
 app.post('/api/balance', authenticate, async (req, res) => {
   const address = req.user.address;
   try {
@@ -89,17 +93,18 @@ app.post('/api/balance', authenticate, async (req, res) => {
     const jr = await rpcRes.json();
     res.json(jr);
   } catch (err) {
-    console.error(err);
+    console.error('Balance proxy error:', err);
     res.status(502).json({ error: 'Fullnode RPC failed' });
   }
 });
 
-// Enter the raffle with a given ticket count
+// 3) Enter the raffle
 app.post('/api/enter', authenticate, (req, res) => {
   const { address: bodyAddr, count } = req.body;
   const addr = req.user.address;
   if (bodyAddr !== addr) return res.status(400).json({ error: 'Address mismatch' });
-  if (!Number.isInteger(count) || count < 1) return res.status(400).json({ error: 'Invalid ticket count' });
+  if (!Number.isInteger(count) || count < 1)
+    return res.status(400).json({ error: 'Invalid ticket count' });
 
   const db = loadData();
   if (db.entries.find(e => e.address === addr))
@@ -107,60 +112,60 @@ app.post('/api/enter', authenticate, (req, res) => {
 
   db.entries.push({ address: addr, count });
   saveData({ entries: db.entries, lastWinner: db.lastWinner });
-  res.json({ success: true, total: db.entries.reduce((sum, e) => sum + e.count, 0) });
+  res.json({ success: true, total: db.entries.reduce((s, e) => s + e.count, 0) });
 });
 
-// List stored entries
+// 4) List entries & last winner
 app.get('/api/entries', (req, res) => {
   const db = loadData();
   res.json({ entries: db.entries });
 });
-
-// Get last winner
 app.get('/api/last-winner', (req, res) => {
   const db = loadData();
   res.json({ lastWinner: db.lastWinner });
 });
 
-// Draw a ticket-weighted winner, reset entries
+// 5) Draw a weighted winner
 app.post('/api/draw', (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY)
     return res.status(403).json({ error: 'Forbidden' });
 
   const db = loadData();
-  if (db.entries.length === 0)
+  const validEntries = db.entries.filter(e => e.count > 0);
+  if (validEntries.length === 0)
     return res.status(400).json({ error: 'No entries this round' });
 
-  const weighted = db.entries
-    .filter(e => e.count > 0)
-    .flatMap(e => Array(e.count).fill(e.address));
+  const weighted = validEntries.flatMap(e =>
+    Array(e.count).fill(e.address)
+  );
   const winner = weighted[Math.floor(Math.random() * weighted.length)];
 
   saveData({ entries: [], lastWinner: winner });
   res.json({ winner });
 });
 
-// Auto-draw & reset hourly 18–23
+// 6) Cron auto-draw hourly 18–23
 cron.schedule('0 18-23 * * *', () => {
   const db = loadData();
-  if (!db.entries.length) return;
+  const validEntries = db.entries.filter(e => e.count > 0);
+  if (!validEntries.length) return;
 
-  const weighted = db.entries
-    .filter(e => e.count > 0)
-    .flatMap(e => Array(e.count).fill(e.address));
+  const weighted = validEntries.flatMap(e =>
+    Array(e.count).fill(e.address)
+  );
   const winner = weighted[Math.floor(Math.random() * weighted.length)];
-  console.log('🏆 Auto draw winner:', winner);
-
+  console.log('🏆 Auto-draw winner:', winner);
   saveData({ entries: [], lastWinner: winner });
 });
 
-// Global error handler
+// ─── STATIC FILES & ERROR HANDLER ──────────
+app.use(express.static(path.join(__dirname, 'public')));
 app.use((err, req, res, next) => {
-  console.error(err);
+  console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start server
+// ─── START SERVER ───────────────────────────
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });

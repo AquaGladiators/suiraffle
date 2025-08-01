@@ -17,113 +17,105 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ─── CONFIG ───────────────────────────────────
-  const DECIMALS          = 10 ** 6;                                   // RAF has 6 decimals
-  const TOKENS_PER_TICKET = 1_000_000;                                 // 1,000,000 RAF per ticket
-  const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS;              // = 1e12 microunits
+  const DECIMALS          = 10 ** 6;             // RAF has 6 decimals
+  const TOKENS_PER_TICKET = 1_000_000;           // 1,000,000 RAF per ticket
+  const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
   const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
   let jwtToken            = null;
   let currentWinner       = null;
 
-  // ─── UI REFERENCES ────────────────────────────
-  const addr         = document.getElementById('addressInput');
-  const authBtn      = document.getElementById('authBtn');
-  const enterBtn     = document.getElementById('enterBtn');
-  const drawBtn      = document.getElementById('drawBtn');
-  const valMsg       = document.getElementById('validationMsg');
-  const balMsg       = document.getElementById('balanceMsg');
-  const entMsg       = document.getElementById('entryCountMsg');
-  const balSec       = document.getElementById('balanceSection');
-  const entSec       = document.getElementById('entriesSection');
-  const countEl      = document.getElementById('count');
-  const entriesList  = document.getElementById('entriesList');
-  const winnersList  = document.getElementById('winnersList');
-  const banner       = document.getElementById('winnerAnnouncement');
-  const countdown    = document.getElementById('countdown');
+  // ─── UI ELEMENTS ─────────────────────────────
+  const addrInput      = document.getElementById('addressInput');
+  const authBtn        = document.getElementById('authBtn');
+  const enterBtn       = document.getElementById('enterBtn');
+  const drawBtn        = document.getElementById('drawBtn');
+  const validationMsg  = document.getElementById('validationMsg');
+  const balanceMsg     = document.getElementById('balanceMsg');
+  const entryCountMsg  = document.getElementById('entryCountMsg');
+  const balanceSection = document.getElementById('balanceSection');
+  const entriesSection = document.getElementById('entriesSection');
+  const countEl        = document.getElementById('count');
+  const entriesList    = document.getElementById('entriesList');
+  const winnersList    = document.getElementById('winnersList');
+  const winnerBanner   = document.getElementById('winnerAnnouncement');
+  const countdownEl    = document.getElementById('countdown');
 
-  // ─── HELPER FUNCTIONS ─────────────────────────
-  function showWinner(address) {
-    banner.textContent = `🎉 Winner: ${address}!`;
-    banner.classList.remove('hidden');
+  // ─── HELPERS ─────────────────────────────────
+  function showWinner(addr) {
+    winnerBanner.textContent = `🎉 Winner: ${addr}!`;
+    winnerBanner.classList.remove('hidden');
   }
-
   function hideWinner() {
-    banner.classList.add('hidden');
+    winnerBanner.classList.add('hidden');
   }
-
-  function saveWin(address) {
+  function saveWinner(addr) {
     const wins = JSON.parse(localStorage.getItem('winners') || '[]');
-    wins.unshift(address);
-    localStorage.setItem('winners', JSON.stringify(wins.slice(0, 5)));
+    wins.unshift(addr);
+    localStorage.setItem('winners', JSON.stringify(wins.slice(0,5)));
   }
-
-  function updateWins() {
+  function updateLastWinners() {
     const wins = JSON.parse(localStorage.getItem('winners') || '[]').slice(0,5);
-    winnersList.innerHTML = wins.map((a,i) => `<li>${i+1}. ${a}</li>`).join('');
+    winnersList.innerHTML = wins.map((w,i) => `<li>${i+1}. ${w}</li>`).join('');
   }
-
   async function loadEntries() {
-    const res = await fetch('/api/entries');
-    const { entries } = await res.json();
-    let total = 0;
-    entriesList.innerHTML = entries.map((e,i) => {
-      total += e.count;
-      return `<li>${i+1}. ${e.address} — ${e.count} tickets</li>`;
-    }).join('');
-    countEl.textContent = `Total Tickets: ${total}`;
-    entSec.classList.remove('hidden');
-  }
-
-  async function loadLastWinner() {
-    const res = await fetch('/api/last-winner');
-    const { lastWinner } = await res.json();
-    if (lastWinner && lastWinner !== currentWinner) {
-      currentWinner = lastWinner;
-      showWinner(lastWinner);
+    try {
+      const res = await fetch('/api/entries');
+      const { entries } = await res.json();
+      let total = 0;
+      entriesList.innerHTML = entries.map((e,i) => {
+        total += e.count;
+        return `<li>${i+1}. ${e.address} — ${e.count} tickets</li>`;
+      }).join('');
+      countEl.textContent = `Total Tickets: ${total}`;
+      entriesSection.classList.remove('hidden');
+    } catch (err) {
+      console.error('Error loading entries:', err);
     }
   }
 
   function getNextDraw() {
     const now = new Date();
     const hours = [18,19,20,21,22,23];
-    const next = hours
+    return hours
       .map(h => {
         const d = new Date(now);
         d.setHours(h,0,0,0);
-        if (d <= now) d.setDate(d.getDate() + 1);
+        if (d <= now) d.setDate(d.getDate()+1);
         return d;
       })
       .reduce((a,b) => a < b ? a : b);
-    return next;
   }
-
   function startCountdown() {
-    setInterval(() => {
-      const diff = getNextDraw() - Date.now();
+    function update() {
+      const next = getNextDraw();
+      const diff = next - Date.now();
       if (diff <= 0) {
         loadEntries();
         return;
       }
-      const h = String(Math.floor(diff / 3600000)).padStart(2,'0');
-      const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2,'0');
-      const s = String(Math.floor((diff % 60000) / 1000)).padStart(2,'0');
-      countdown.textContent = `Next draw in: ${h}:${m}:${s}`;
-    }, 1000);
+      const hrs  = String(Math.floor(diff/3600000)).padStart(2,'0');
+      const mins = String(Math.floor((diff%3600000)/60000)).padStart(2,'0');
+      const secs = String(Math.floor((diff%60000)/1000)).padStart(2,'0');
+      countdownEl.textContent = `Next draw in: ${hrs}:${mins}:${secs}`;
+    }
+    update();
+    setInterval(update, 1000);
   }
 
-  // ─── EVENT LISTENERS ──────────────────────────
-  addr.addEventListener('input', () => {
-    valMsg.textContent = '';
-    authBtn.disabled = !/^0x[a-fA-F0-9]{64}$/.test(addr.value.trim());
-    balSec.classList.add('hidden');
-    entSec.classList.add('hidden');
+  // ─── EVENT LISTENERS ─────────────────────────
+  addrInput.addEventListener('input', () => {
+    validationMsg.textContent = '';
+    authBtn.disabled = !/^0x[a-fA-F0-9]{64}$/.test(addrInput.value.trim());
+    balanceSection.classList.add('hidden');
+    entriesSection.classList.add('hidden');
     hideWinner();
   });
 
   authBtn.addEventListener('click', async () => {
-    const address = addr.value.trim();
-    valMsg.textContent = '';
+    const address = addrInput.value.trim();
+    validationMsg.textContent = '';
 
-    // Authenticate and get token
+    // 1) Get JWT
     let res = await fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
@@ -131,7 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     const authData = await res.json();
     if (!authData.token) {
-      valMsg.textContent = authData.error;
+      validationMsg.textContent = authData.error;
       return;
     }
     jwtToken = authData.token;
@@ -139,52 +131,53 @@ document.addEventListener('DOMContentLoaded', () => {
     authBtn.disabled = true;
 
     // Debug logs
-    console.log('👉 Fetching balance with token:', jwtToken);
+    console.log('👉 token:', jwtToken);
 
-    // Fetch balance via proxy endpoint
-    balMsg.textContent = '⏳ Fetching balance…';
+    // 2) Fetch balance via proxy
+    balanceMsg.textContent = '⏳ Fetching balance…';
     res = await fetch('/api/balance', {
       method: 'POST',
       headers: {
         'Content-Type':'application/json',
-        'Authorization': 'Bearer ' + jwtToken
+        'Authorization':'Bearer ' + jwtToken
       }
     });
     console.log('💬 /api/balance status:', res.status);
     const jr = await res.json();
-    console.log('💬 /api/balance response body:', jr);
+    console.log('💬 /api/balance body:', jr);
 
-    const arr = Array.isArray(jr.result) ? jr.result : [];
+    // 3) Compute tickets
+    const arr  = Array.isArray(jr.result) ? jr.result : [];
     const coin = arr.find(c => c.coinType === RAF_TYPE);
     const raw  = coin ? Number(coin.totalBalance) : 0;
 
-    // Update balance UI
+    // 4) Update UI
     const human = raw / DECIMALS;
-    balMsg.textContent = `💰 ${human.toLocaleString()} RAF`;
+    balanceMsg.textContent = `💰 ${human.toLocaleString()} RAF`;
     const tickets = Math.floor(raw / MICROS_PER_TICKET);
-    entMsg.textContent = tickets > 0
+    entryCountMsg.textContent = tickets > 0
       ? `🎟️ ${tickets.toLocaleString()} tickets`
       : `❌ Need ≥ ${TOKENS_PER_TICKET.toLocaleString()} RAF`;
     enterBtn.dataset.count = tickets;
     enterBtn.disabled = tickets === 0;
-    balSec.classList.remove('hidden');
+    balanceSection.classList.remove('hidden');
   });
 
   enterBtn.addEventListener('click', async () => {
-    const count = +enterBtn.dataset.count;
+    const count = +enterBtn.dataset.count || 0;
     if (!count) return;
-    const address = addr.value.trim();
+    const address = addrInput.value.trim();
     const res = await fetch('/api/enter', {
       method: 'POST',
       headers: {
         'Content-Type':'application/json',
-        'Authorization': 'Bearer ' + jwtToken
+        'Authorization':'Bearer ' + jwtToken
       },
       body: JSON.stringify({ address, count })
     });
-    const data = await res.json();
+    const d = await res.json();
     if (res.ok) loadEntries();
-    else valMsg.textContent = data.error;
+    else validationMsg.textContent = d.error;
   });
 
   drawBtn.addEventListener('click', async () => {
@@ -193,22 +186,20 @@ document.addEventListener('DOMContentLoaded', () => {
       method: 'POST',
       headers: { 'x-admin-key': key }
     });
-    const result = await res.json();
-    if (result.winner) {
+    const o = await res.json();
+    if (o.winner) {
       confetti({ particleCount:200, spread:60 });
-      showWinner(result.winner);
-      saveWin(result.winner);
-      updateWins();
+      showWinner(o.winner);
+      saveWinner(o.winner);
+      updateLastWinners();
     } else {
-      valMsg.textContent = result.error;
+      validationMsg.textContent = o.error;
     }
   });
 
-  // ─── INITIALIZE ──────────────────────────────
-  setInterval(loadEntries, 60000);
-  setInterval(loadLastWinner, 60000);
+  // ─── POLLING & INIT ─────────────────────────
+  setInterval(loadEntries, 60_000);
   loadEntries();
-  updateWins();
-  loadLastWinner();
+  updateLastWinners();
   startCountdown();
 });
