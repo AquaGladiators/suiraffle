@@ -1,7 +1,7 @@
 // public/app.js
 
 document.addEventListener('DOMContentLoaded', () => {
-  // Particles
+  // ─── PARTICLES ────────────────────────────────
   if (window.tsParticles) {
     tsParticles.load('tsparticles', {
       fpsLimit: 60,
@@ -22,9 +22,10 @@ document.addEventListener('DOMContentLoaded', () => {
   const DECIMALS          = 10 ** 6;           // RAF has 6 decimals
   const TOKENS_PER_TICKET = 1_000_000;         // 1,000,000 RAF per ticket
   const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
-  let jwtToken, currentWinner = null;
+  let jwtToken = null;
+  let currentWinner = null;
 
-  // UI refs
+  // ─── UI REFS ──────────────────────────────────
   const addr         = id('addressInput');
   const authBtn      = id('authBtn');
   const enterBtn     = id('enterBtn');
@@ -40,17 +41,17 @@ document.addEventListener('DOMContentLoaded', () => {
   const banner       = id('winnerAnnouncement');
   const countdown    = id('countdown');
 
-  // Helpers
-  function showWinner(addr) {
-    banner.textContent = `🎉 Winner: ${addr}!`;
+  // ─── HELPERS ─────────────────────────────────
+  function showWinner(a) {
+    banner.textContent = `🎉 Winner: ${a}!`;
     banner.classList.remove('hidden');
   }
   function hideWinner() {
     banner.classList.add('hidden');
   }
-  function saveWin(addr) {
+  function saveWin(a) {
     const w = JSON.parse(localStorage.getItem('winners') || '[]');
-    w.unshift(addr);
+    w.unshift(a);
     localStorage.setItem('winners', JSON.stringify(w.slice(0,5)));
   }
   function updateWins() {
@@ -80,7 +81,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const now = new Date();
     const times = [18,19,20,21,22,23].map(h => {
       const d = new Date(now);
-      d.setHours(h, 0, 0, 0);
+      d.setHours(h,0,0,0);
       if (d <= now) d.setDate(d.getDate()+1);
       return d;
     });
@@ -98,7 +99,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
   function id(i) { return document.getElementById(i); }
 
-  // Event listeners
+  // ─── EVENT LISTENERS ─────────────────────────
   addr.addEventListener('input', () => {
     valMsg.textContent = '';
     authBtn.disabled = !/^0x[a-fA-F0-9]{64}$/.test(addr.value.trim());
@@ -111,7 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const address = addr.value.trim();
     valMsg.textContent = '';
 
-    // get JWT
+    // 1) Authenticate & get JWT
     let res = await fetch('/api/auth', {
       method:'POST',
       headers:{ 'Content-Type':'application/json' },
@@ -126,7 +127,7 @@ document.addEventListener('DOMContentLoaded', () => {
     authBtn.textContent = 'Authenticated';
     authBtn.disabled = true;
 
-    // fetch balances (proxy through your server if needed)
+    // 2) Fetch balance
     balMsg.textContent = '⏳ Fetching balance…';
     res = await fetch(FULLNODE_URL, {
       method:'POST',
@@ -142,15 +143,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const coin = arr.find(c => c.coinType === RAF_TYPE);
     const raw  = coin ? Number(coin.totalBalance) : 0;
 
+    // 3) Update UI
     const human = raw / DECIMALS;
     balMsg.textContent = `💰 ${human.toLocaleString()} RAF`;
-
-    // correct ticket calc
     const tickets = Math.floor(raw / MICROS_PER_TICKET);
     entMsg.textContent = tickets > 0
       ? `🎟️ ${tickets.toLocaleString()} tickets`
       : `❌ Need ≥ ${TOKENS_PER_TICKET.toLocaleString()} RAF`;
-
     enterBtn.dataset.count = tickets;
     enterBtn.disabled = tickets === 0;
     balSec.classList.remove('hidden');
@@ -164,7 +163,7 @@ document.addEventListener('DOMContentLoaded', () => {
       method:'POST',
       headers:{
         'Content-Type':'application/json',
-        'Authorization':'Bearer '+jwtToken
+        'Authorization':'Bearer ' + jwtToken
       },
       body: JSON.stringify({ address, count })
     });
@@ -190,7 +189,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // initialize
+  // ─── INIT ─────────────────────────────────────
   setInterval(loadEntries, 60_000);
   setInterval(loadLastWinner, 60_000);
   loadEntries();
