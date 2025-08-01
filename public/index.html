@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>SuiRaffle</title>
+  <link rel="icon" href="data:,">
+
+  <!-- Tailwind CSS (dev only; in prod you'd compile) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Your custom styles -->
+  <link rel="stylesheet" href="/styles.css">
+
+  <!-- Animate.css -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+
+  <!-- tsParticles UMD bundle -->
+  <script src="https://cdn.jsdelivr.net/npm/tsparticles@2.9.3/tsparticles.bundle.min.js"></script>
+
+  <!-- canvas-confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+</head>
+<body class="bg-gray-100">
+
+  <!-- Navbar -->
+  <nav class="navbar">
+    <div class="navbar-container">
+      <div class="logo neon animate__animated animate__pulse animate__infinite">
+        SuiRaffle 🎟️
+      </div>
+      <div id="countdown" class="countdown">Next draw in: --:--:--</div>
+      <div id="winnerAnnouncement" class="winner-banner hidden"></div>
+      <div class="flex-1"></div>
+    </div>
+  </nav>
+
+  <!-- Particle Background -->
+  <div id="tsparticles" class="background"></div>
+
+  <div class="main-container">
+    <!-- Sidebar: Last 5 Winners -->
+    <aside class="sidebar">
+      <h2>Last 5 Winners</h2>
+      <ul id="winnersList" class="winner-list"></ul>
+    </aside>
+
+    <!-- Main Raffle Card -->
+    <main class="card">
+      <input id="addressInput" type="text" placeholder="Paste your Sui wallet address (0x…)" class="input-field"/>
+      <p id="validationMsg" class="error-text"></p>
+
+      <button id="authBtn" disabled class="btn btn-primary">Authenticate & Check Balance</button>
+
+      <div id="balanceSection" class="balance-section hidden">
+        <p id="balanceMsg" class="balance-text"></p>
+        <p id="entryCountMsg" class="entry-text"></p>
+        <button id="enterBtn" disabled class="btn btn-success">Enter Raffle</button>
+      </div>
+
+      <div id="entriesSection" class="entries-section hidden">
+        <p id="count" class="count-text"></p>
+        <ul id="entriesList" class="entries-list"></ul>
+      </div>
+
+      <button id="drawBtn" class="btn btn-danger">Draw Winner</button>
+    </main>
+  </div>
+
+  <!-- Your application logic -->
+  <script src="/app.js"></script>
+</body>
+</html>

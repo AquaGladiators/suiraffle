@@ -1,0 +1,19 @@
+{
+  "name": "sui-raffle",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@mysten/sui.js": "^0.1.2",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^8.5.1",
+    "node-cron": "^4.2.1",
+    "punycode": "^2.3.1",
+    "sqlite3": "^5.0.0"
+  }
+}
