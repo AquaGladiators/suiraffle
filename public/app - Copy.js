@@ -17,9 +17,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // 2) Config
-  const FULLNODE_URL     = 'https://fullnode.mainnet.sui.io:443';
-  const DECIMALS         = 1e6;          // RAF has 6 decimals
-  const TOKENS_PER_TICKET = 1_000_000;   // 1,000,000 raf = 1 ticket
+  const FULLNODE_URL       = 'https://fullnode.mainnet.sui.io:443';
+  const DECIMALS           = 10 ** 6;       // RAF has 6 decimals
+  const TOKENS_PER_TICKET  = 1_000_000;     // 1 000 000 RAF per ticket
+  const MICROS_PER_TICKET  = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
   let jwtToken;
 
   // 3) UI elements
@@ -58,9 +59,9 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadEntries() {
     try {
       const res = await fetch('/api/entries');
-      const db  = await res.json();
+      const { entries } = await res.json();
       let total = 0;
-      entriesList.innerHTML = db.entries.map((e, i) => {
+      entriesList.innerHTML = entries.map((e, i) => {
         total += e.count;
         return `<li>${i+1}. ${e.address} — ${e.count} tickets</li>`;
       }).join('');
@@ -114,7 +115,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const address = addrInput.value.trim();
     validationMsg.textContent = '';
     try {
-      // Get JWT
+      // Fetch JWT
       let res = await fetch('/api/auth', {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
@@ -126,8 +127,8 @@ document.addEventListener('DOMContentLoaded', () => {
       authBtn.textContent = 'Authenticated';
       authBtn.disabled = true;
 
-      // Fetch balance
-      balanceMsg.textContent = '⏳ Fetching balances…';
+      // Fetch raw microunits
+      balanceMsg.textContent = '⏳ Fetching balance…';
       res = await fetch(FULLNODE_URL, {
         method: 'POST',
         headers: { 'Content-Type':'application/json' },
@@ -138,18 +139,20 @@ document.addEventListener('DOMContentLoaded', () => {
           params: [address]
         })
       });
-      const jr = await res.json();
+      const jr  = await res.json();
       const arr = Array.isArray(jr.result) ? jr.result : [];
-      const coin = arr.find(c => c.coinType.includes('RAF'));
-      const raw   = coin ? Number(coin.totalBalance) : 0;
+      const coin = arr.find(c => c.coinType.includes('raf::RAF'));
+      const raw  = coin ? Number(coin.totalBalance) : 0;
+
+      // Human balance display
       const human = raw / DECIMALS;
       balanceMsg.textContent = `💰 ${human.toLocaleString()} RAF`;
 
-      // Compute tickets
-      const tickets = Math.floor(human / (TOKENS_PER_TICKET / DECIMALS));
+      // ✅ CORRECTED ticket calc: raw microunits ÷ MICROS_PER_TICKET
+      const tickets = Math.floor(raw / MICROS_PER_TICKET);
       entryCountMsg.textContent = tickets > 0
-        ? `🎟️ ${tickets.toLocaleString()} tickets`
-        : `❌ Need ≥ ${(TOKENS_PER_TICKET/DECIMALS).toLocaleString()} RAF`;
+        ? `🎟️ ${tickets.toLocaleString()} ticket${tickets > 1 ? 's' : ''}`
+        : `❌ Need ≥ ${TOKENS_PER_TICKET.toLocaleString()} RAF`;
       enterBtn.dataset.count = tickets;
       enterBtn.disabled = tickets === 0;
       balanceSection.classList.remove('hidden');
@@ -204,10 +207,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // 7) Poll every minute for real-time updates
+  // 7) Poll for real-time updates
   setInterval(loadEntries, 60_000);
 
-  // 8) Kick things off
+  // 8) Initialize
   loadEntries();
   updateLastWinners();
   startCountdown();
