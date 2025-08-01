@@ -138,6 +138,9 @@ document.addEventListener('DOMContentLoaded', () => {
     authBtn.textContent = 'Authenticated';
     authBtn.disabled = true;
 
+    // Debug logs
+    console.log('👉 Fetching balance with token:', jwtToken);
+
     // Fetch balance via proxy endpoint
     balMsg.textContent = '⏳ Fetching balance…';
     res = await fetch('/api/balance', {
@@ -147,7 +150,10 @@ document.addEventListener('DOMContentLoaded', () => {
         'Authorization': 'Bearer ' + jwtToken
       }
     });
+    console.log('💬 /api/balance status:', res.status);
     const jr = await res.json();
+    console.log('💬 /api/balance response body:', jr);
+
     const arr = Array.isArray(jr.result) ? jr.result : [];
     const coin = arr.find(c => c.coinType === RAF_TYPE);
     const raw  = coin ? Number(coin.totalBalance) : 0;
