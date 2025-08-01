@@ -16,28 +16,29 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Config
+  // ─── CONFIG ───────────────────────────────────
   const FULLNODE_URL      = 'https://fullnode.mainnet.sui.io:443';
+  const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
   const DECIMALS          = 10 ** 6;           // RAF has 6 decimals
   const TOKENS_PER_TICKET = 1_000_000;         // 1,000,000 RAF per ticket
-  const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // 1e12
+  const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
   let jwtToken, currentWinner = null;
 
   // UI refs
-  const addr      = id('addressInput');
-  const authBtn   = id('authBtn');
-  const enterBtn  = id('enterBtn');
-  const drawBtn   = id('drawBtn');
-  const valMsg    = id('validationMsg');
-  const balMsg    = id('balanceMsg');
-  const entMsg    = id('entryCountMsg');
-  const balSec    = id('balanceSection');
-  const entSec    = id('entriesSection');
-  const countEl   = id('count');
-  const entriesList = id('entriesList');
-  const winnersList = id('winnersList');
-  const banner    = id('winnerAnnouncement');
-  const countdown = id('countdown');
+  const addr         = id('addressInput');
+  const authBtn      = id('authBtn');
+  const enterBtn     = id('enterBtn');
+  const drawBtn      = id('drawBtn');
+  const valMsg       = id('validationMsg');
+  const balMsg       = id('balanceMsg');
+  const entMsg       = id('entryCountMsg');
+  const balSec       = id('balanceSection');
+  const entSec       = id('entriesSection');
+  const countEl      = id('count');
+  const entriesList  = id('entriesList');
+  const winnersList  = id('winnersList');
+  const banner       = id('winnerAnnouncement');
+  const countdown    = id('countdown');
 
   // Helpers
   function showWinner(addr) {
@@ -48,13 +49,13 @@ document.addEventListener('DOMContentLoaded', () => {
     banner.classList.add('hidden');
   }
   function saveWin(addr) {
-    const w = JSON.parse(localStorage.getItem('winners')||'[]');
+    const w = JSON.parse(localStorage.getItem('winners') || '[]');
     w.unshift(addr);
     localStorage.setItem('winners', JSON.stringify(w.slice(0,5)));
   }
   function updateWins() {
-    const w = JSON.parse(localStorage.getItem('winners')||'[]').slice(0,5);
-    winnersList.innerHTML = w.map((a,i)=>`<li>${i+1}. ${a}</li>`).join('');
+    const w = JSON.parse(localStorage.getItem('winners') || '[]').slice(0,5);
+    winnersList.innerHTML = w.map((a,i) => `<li>${i+1}. ${a}</li>`).join('');
   }
   async function loadEntries() {
     const r = await fetch('/api/entries');
@@ -83,10 +84,10 @@ document.addEventListener('DOMContentLoaded', () => {
       if (d <= now) d.setDate(d.getDate()+1);
       return d;
     });
-    return times.reduce((a,b)=> a<b?a:b);
+    return times.reduce((a,b) => a < b ? a : b);
   }
   function startCountdown() {
-    setInterval(()=>{
+    setInterval(() => {
       const diff = getNextDraw() - Date.now();
       if (diff <= 0) return loadEntries();
       const h = String(Math.floor(diff/3600000)).padStart(2,'0');
@@ -112,7 +113,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // get JWT
     let res = await fetch('/api/auth', {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({ address })
     });
     const authData = await res.json();
@@ -124,10 +126,11 @@ document.addEventListener('DOMContentLoaded', () => {
     authBtn.textContent = 'Authenticated';
     authBtn.disabled = true;
 
-    // fetch balances
+    // fetch balances (proxy through your server if needed)
     balMsg.textContent = '⏳ Fetching balance…';
     res = await fetch(FULLNODE_URL, {
-      method:'POST', headers:{'Content-Type':'application/json'},
+      method:'POST',
+      headers:{ 'Content-Type':'application/json' },
       body: JSON.stringify({
         jsonrpc:'2.0', id:1,
         method:'suix_getAllBalances',
@@ -135,8 +138,8 @@ document.addEventListener('DOMContentLoaded', () => {
       })
     });
     const jr = await res.json();
-    const arr = Array.isArray(jr.result)? jr.result : [];
-    const coin = arr.find(c=>c.coinType===RAF_TYPE);
+    const arr = Array.isArray(jr.result) ? jr.result : [];
+    const coin = arr.find(c => c.coinType === RAF_TYPE);
     const raw  = coin ? Number(coin.totalBalance) : 0;
 
     const human = raw / DECIMALS;
