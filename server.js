@@ -20,11 +20,11 @@ if (!JWT_SECRET || !ADMIN_KEY) {
   process.exit(1);
 }
 
-// Sui & SEWEY constants
+// Sui & RAF constants
 const FULLNODE_URL      = 'https://fullnode.mainnet.sui.io:443';
-const SEWEY_TYPE        = '0x3ae23b0de8999a7e3f0cf196cd1f67182dd02a9f9c51dd8cf3e3355d0b34f4b3::sewey::SEWEY';
-const DECIMALS          = 1e6;                // SEWEY has 6 decimals
-const TOKENS_PER_TICKET = 1_000_000;          // 1 000 000 SEWEY per ticket
+const SEWEY_TYPE        = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
+const DECIMALS          = 1e6;                // RAF has 6 decimals
+const TOKENS_PER_TICKET = 1_000_000;          // 1 000 000 RAF per ticket
 const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
 
 // ─── STORAGE HELPERS ─────────────────────────
@@ -113,7 +113,7 @@ app.get('/api/entries', async (req, res) => {
       });
       const rpcJson = await rpcRes.json();
       const arr = Array.isArray(rpcJson.result) ? rpcJson.result : [];
-      const coin = arr.find(c => c.coinType === SEWEY_TYPE);
+      const coin = arr.find(c => c.coinType === RAF_TYPE);
       const raw = coin ? Number(coin.totalBalance) : 0;
 
       // Correct ticket count = floor(raw / microunits-per-ticket)

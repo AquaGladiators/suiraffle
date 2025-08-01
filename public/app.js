@@ -18,8 +18,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 2) Config
   const FULLNODE_URL     = 'https://fullnode.mainnet.sui.io:443';
-  const DECIMALS         = 1e6;          // SEWEY has 6 decimals
-  const TOKENS_PER_TICKET = 1_000_000;   // 1,000,000 SEWEY = 1 ticket
+  const DECIMALS         = 1e6;          // RAF has 6 decimals
+  const TOKENS_PER_TICKET = 1_000_000;   // 1,000,000 raf = 1 ticket
   let jwtToken;
 
   // 3) UI elements
@@ -40,7 +40,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // 4) Helper functions
   function showWinner(addr) {
-    winnerBanner.textContent = `🎉 Winner: ${addr}! You win ${TOKENS_PER_TICKET.toLocaleString()} SEWEY! 🎉`;
+    winnerBanner.textContent = `🎉 Winner: ${addr}! You win ${TOKENS_PER_TICKET.toLocaleString()} RAF! 🎉`;
     winnerBanner.classList.remove('hidden');
   }
   function hideWinner() {
@@ -140,16 +140,16 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       const jr = await res.json();
       const arr = Array.isArray(jr.result) ? jr.result : [];
-      const coin = arr.find(c => c.coinType.includes('sewey'));
+      const coin = arr.find(c => c.coinType.includes('RAF'));
       const raw   = coin ? Number(coin.totalBalance) : 0;
       const human = raw / DECIMALS;
-      balanceMsg.textContent = `💰 ${human.toLocaleString()} SEWEY`;
+      balanceMsg.textContent = `💰 ${human.toLocaleString()} RAF`;
 
       // Compute tickets
       const tickets = Math.floor(human / (TOKENS_PER_TICKET / DECIMALS));
       entryCountMsg.textContent = tickets > 0
         ? `🎟️ ${tickets.toLocaleString()} tickets`
-        : `❌ Need ≥ ${(TOKENS_PER_TICKET/DECIMALS).toLocaleString()} SEWEY`;
+        : `❌ Need ≥ ${(TOKENS_PER_TICKET/DECIMALS).toLocaleString()} RAF`;
       enterBtn.dataset.count = tickets;
       enterBtn.disabled = tickets === 0;
       balanceSection.classList.remove('hidden');
