@@ -2,14 +2,15 @@
 
 document.addEventListener('DOMContentLoaded', () => {
   // ─── CONFIG ────────────────────────────────
-  const DECIMALS          = 10 ** 6;
-  const TOKENS_PER_TICKET = 1_000_000;
-  const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS;
-  let jwtToken            = null;
-  let currentWinner       = null;
-  let currentUser         = null;
+  const DECIMALS          = 10 ** 6;             // RAF has 6 decimals
+  const TOKENS_PER_TICKET = 1_000_000;           // 1,000,000 RAF per ticket
+  const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
 
-  // ─── UI REFS ───────────────────────────────
+  let jwtToken      = null;
+  let currentUser   = null;
+  let currentWinner = null;
+
+  // ─── UI REFERENCES ─────────────────────────
   const addrInput      = document.getElementById('addressInput');
   const authBtn        = document.getElementById('authBtn');
   const enterBtn       = document.getElementById('enterBtn');
@@ -33,10 +34,12 @@ document.addEventListener('DOMContentLoaded', () => {
     winnerBanner.classList.remove('hidden');
     maybeShowBuy();
   }
+
   function hideWinner() {
     winnerBanner.classList.add('hidden');
     buyBtn.classList.add('hidden');
   }
+
   function maybeShowBuy() {
     if (currentUser && currentWinner === currentUser) {
       buyBtn.classList.remove('hidden');
@@ -45,17 +48,79 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // (loadEntries, loadLastWinner, getNextDraw, startCountdown go here, unchanged, except loadLastWinner should call showWinner on load)
+  async function loadEntries() {
+    try {
+      const res = await fetch('/api/entries');
+      const { entries } = await res.json();
+      let total = 0;
+      entriesList.innerHTML = entries.map((e,i) => {
+        total += e.count;
+        return `<li>${i+1}. ${e.address} — ${e.count} tickets</li>`;
+      }).join('');
+      countEl.textContent = `Total Tickets: ${total}`;
+      entriesSection.classList.remove('hidden');
+    } catch (err) {
+      console.error('Error loading entries:', err);
+    }
+  }
 
-  // ─── AUTHENTICATION & BALANCE ─────────────
+  async function loadLastWinner() {
+    try {
+      const res = await fetch('/api/last-winner');
+      const { lastWinner } = await res.json();
+      if (lastWinner && lastWinner !== currentWinner) {
+        showWinner(lastWinner);
+      }
+    } catch (err) {
+      console.error('Error loading last winner:', err);
+    }
+  }
+
+  function getNextDraw() {
+    const now = new Date();
+    return [18,19,20,21,22,23]
+      .map(h => {
+        const d = new Date(now);
+        d.setHours(h,0,0,0);
+        if (d <= now) d.setDate(d.getDate() + 1);
+        return d;
+      })
+      .reduce((a,b) => a < b ? a : b);
+  }
+
+  function startCountdown() {
+    function update() {
+      const diff = getNextDraw() - Date.now();
+      if (diff <= 0) {
+        loadEntries();
+        return;
+      }
+      const h = String(Math.floor(diff/3600000)).padStart(2,'0');
+      const m = String(Math.floor((diff%3600000)/60000)).padStart(2,'0');
+      const s = String(Math.floor((diff%60000)/1000)).padStart(2,'0');
+      countdownEl.textContent = `Next draw in: ${h}:${m}:${s}`;
+    }
+    update();
+    setInterval(update, 1000);
+  }
+
+  // ─── EVENT LISTENERS ─────────────────────────
+  addrInput.addEventListener('input', () => {
+    validationMsg.textContent = '';
+    authBtn.disabled = !/^0x[a-fA-F0-9]{64}$/.test(addrInput.value.trim());
+    balanceSection.classList.add('hidden');
+    entriesSection.classList.add('hidden');
+    hideWinner();
+  });
+
   authBtn.addEventListener('click', async () => {
     const address = addrInput.value.trim();
     validationMsg.textContent = '';
 
-    // 1) Get JWT
+    // 1) Authenticate
     let res = await fetch('/api/auth', {
       method: 'POST',
-      headers:{ 'Content-Type':'application/json' },
+      headers: { 'Content-Type':'application/json' },
       body: JSON.stringify({ address })
     });
     const authData = await res.json();
@@ -63,16 +128,53 @@ document.addEventListener('DOMContentLoaded', () => {
       validationMsg.textContent = authData.error;
       return;
     }
-    jwtToken = authData.token;
+    jwtToken    = authData.token;
     currentUser = address;
     authBtn.textContent = 'Authenticated';
-    authBtn.disabled = true;
+    authBtn.disabled    = true;
 
-    // 2) Fetch & display balance (your existing logic)
-    // …
+    // 2) Fetch balance
+    balanceMsg.textContent = '⏳ Fetching balance…';
+    res = await fetch('/api/balance', {
+      method: 'POST',
+      headers: {
+        'Content-Type':'application/json',
+        'Authorization':'Bearer ' + jwtToken
+      }
+    });
+    const jr = await res.json();
+    const arr = Array.isArray(jr.result) ? jr.result : [];
+    const raf  = arr.find(c => c.coinType.toLowerCase().includes('::raf::raf'));
+    const raw  = raf ? Number(raf.totalBalance) : 0;
+
+    const human  = raw / DECIMALS;
+    balanceMsg.textContent = `💰 ${human.toLocaleString()} RAF`;
+    const tickets = Math.floor(raw / MICROS_PER_TICKET);
+    entryCountMsg.textContent = tickets > 0
+      ? `🎟️ ${tickets.toLocaleString()} tickets`
+      : `❌ Need ≥ ${TOKENS_PER_TICKET.toLocaleString()} RAF`;
+    enterBtn.dataset.count = tickets;
+    enterBtn.disabled      = tickets === 0;
+    balanceSection.classList.remove('hidden');
   });
 
-  // ─── DRAW WINNER ───────────────────────────
+  enterBtn.addEventListener('click', async () => {
+    const count = +enterBtn.dataset.count || 0;
+    if (!count) return;
+    const address = currentUser;
+    const res = await fetch('/api/enter', {
+      method: 'POST',
+      headers: {
+        'Content-Type':'application/json',
+        'Authorization':'Bearer ' + jwtToken
+      },
+      body: JSON.stringify({ address, count })
+    });
+    const data = await res.json();
+    if (res.ok) loadEntries();
+    else validationMsg.textContent = data.error;
+  });
+
   drawBtn.addEventListener('click', async () => {
     const key = prompt('Admin Key');
     const res = await fetch('/api/draw', {
@@ -83,19 +185,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (o.winner) {
       confetti({ particleCount:200, spread:60 });
       showWinner(o.winner);
-      // also update history etc.
     } else {
       validationMsg.textContent = o.error;
     }
   });
 
-  // ─── INITIALIZE ───────────────────────────
-  // Load last winner on start
-  loadLastWinner();
-
-  // Poll entries and winner
-  setInterval(loadEntries, 60_000);
-  setInterval(loadLastWinner, 60_000);
+  // ─── INITIALIZE ─────────────────────────────
   loadEntries();
+  loadLastWinner();
   startCountdown();
+  setInterval(loadEntries,     60000);
+  setInterval(loadLastWinner,  60000);
 });
