@@ -7,14 +7,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS;
   let jwtToken            = null;
   let currentWinner       = null;
-  let currentUserAddress  = null;
+  let currentUser         = null;
 
   // ─── UI REFS ───────────────────────────────
   const addrInput      = document.getElementById('addressInput');
   const authBtn        = document.getElementById('authBtn');
   const enterBtn       = document.getElementById('enterBtn');
   const drawBtn        = document.getElementById('drawBtn');
-  const withdrawBtn    = document.getElementById('withdrawBtn');
+  const buyBtn         = document.getElementById('buyBtn');
   const validationMsg  = document.getElementById('validationMsg');
   const balanceMsg     = document.getElementById('balanceMsg');
   const entryCountMsg  = document.getElementById('entryCountMsg');
@@ -28,27 +28,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ─── HELPERS ───────────────────────────────
   function showWinner(addr) {
+    currentWinner = addr;
     winnerBanner.textContent = `🎉 Winner: ${addr}!`;
     winnerBanner.classList.remove('hidden');
+    maybeShowBuy();
   }
   function hideWinner() {
     winnerBanner.classList.add('hidden');
+    buyBtn.classList.add('hidden');
   }
-  function maybeShowWithdraw() {
-    if (currentUserAddress && currentWinner === currentUserAddress) {
-      withdrawBtn.classList.remove('hidden');
+  function maybeShowBuy() {
+    if (currentUser && currentWinner === currentUser) {
+      buyBtn.classList.remove('hidden');
     } else {
-      withdrawBtn.classList.add('hidden');
+      buyBtn.classList.add('hidden');
     }
   }
 
-  // (other helpers: loadEntries, loadLastWinner, getNextDraw, startCountdown) unchanged…
+  // (loadEntries, loadLastWinner, getNextDraw, startCountdown go here, unchanged, except loadLastWinner should call showWinner on load)
 
-  // ─── AUTH & BALANCE ─────────────────────────
+  // ─── AUTHENTICATION & BALANCE ─────────────
   authBtn.addEventListener('click', async () => {
     const address = addrInput.value.trim();
     validationMsg.textContent = '';
-    // Issue JWT
+
+    // 1) Get JWT
     let res = await fetch('/api/auth', {
       method: 'POST',
       headers:{ 'Content-Type':'application/json' },
@@ -60,39 +64,36 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
     jwtToken = authData.token;
-    currentUserAddress = address;
+    currentUser = address;
     authBtn.textContent = 'Authenticated';
     authBtn.disabled = true;
 
-    // (fetch balance…)
+    // 2) Fetch & display balance (your existing logic)
+    // …
   });
 
-  // ─── DRAW & WITHDRAW ────────────────────────
+  // ─── DRAW WINNER ───────────────────────────
   drawBtn.addEventListener('click', async () => {
     const key = prompt('Admin Key');
     const res = await fetch('/api/draw', {
       method: 'POST',
-      headers: {
-        'x-admin-key': key
-      }
+      headers: { 'x-admin-key': key }
     });
     const o = await res.json();
     if (o.winner) {
-      currentWinner = o.winner;
+      confetti({ particleCount:200, spread:60 });
       showWinner(o.winner);
-      maybeShowWithdraw();
-      // (confetti, update history…)
+      // also update history etc.
     } else {
       validationMsg.textContent = o.error;
     }
   });
 
-  // ─── INITIALIZE ─────────────────────────────
-  // Show last winner on load
-  loadLastWinner().then(() => {
-    maybeShowWithdraw();
-  });
-  // Polling
+  // ─── INITIALIZE ───────────────────────────
+  // Load last winner on start
+  loadLastWinner();
+
+  // Poll entries and winner
   setInterval(loadEntries, 60_000);
   setInterval(loadLastWinner, 60_000);
   loadEntries();

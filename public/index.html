@@ -6,19 +6,11 @@
   <title>SuiRaffle</title>
   <link rel="icon" href="data:,">
 
-  <!-- Tailwind CSS (dev only; in prod you'd compile) -->
+  <!-- Tailwind CSS -->
   <script src="https://cdn.tailwindcss.com"></script>
-
-  <!-- Your custom styles -->
   <link rel="stylesheet" href="/styles.css">
-
-  <!-- Animate.css -->
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
-
-  <!-- tsParticles UMD bundle -->
   <script src="https://cdn.jsdelivr.net/npm/tsparticles@2.9.3/tsparticles.bundle.min.js"></script>
-
-  <!-- canvas-confetti -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
 </head>
 <body class="bg-gray-100">
@@ -30,13 +22,12 @@
         SuiRaffle 🎟️
       </div>
       <div id="countdown" class="countdown">Next draw in: --:--:--</div>
-      <!-- Last winner banner always visible if set -->
       <div id="winnerAnnouncement" class="winner-banner hidden"></div>
       <div class="flex-1"></div>
     </div>
   </nav>
 
-  <!-- Particle Background -->
+  <!-- Background Particles -->
   <div id="tsparticles" class="background"></div>
 
   <div class="main-container">
@@ -46,7 +37,7 @@
       <ul id="winnersList" class="winner-list"></ul>
     </aside>
 
-    <!-- Main Raffle Card -->
+    <!-- Main Card -->
     <main class="card">
       <input id="addressInput" type="text" placeholder="Paste your Sui wallet address (0x…)" class="input-field"/>
       <p id="validationMsg" class="error-text"></p>
@@ -64,19 +55,22 @@
         <ul id="entriesList" class="entries-list"></ul>
       </div>
 
-      <!-- Draw & Withdraw Controls -->
-      <div class="mt-4 flex flex-col gap-2">
+      <!-- Draw Winner -->
+      <div class="mt-4">
         <button id="drawBtn" class="btn btn-danger">Draw Winner</button>
-        <a id="withdrawBtn"
+      </div>
+
+      <!-- Buy Raffle Tokens: hidden until you win -->
+      <div class="mt-4">
+        <a id="buyBtn"
            href="https://moonbags.io/bondingcurve/coins/sui-raffle-sui-VvyRVXFykG"
            target="_blank"
-           class="btn btn-success hidden"
-        >
-          Withdraw My Winnings
+           class="btn btn-primary hidden">
+          Buy Raffle Tokens
         </a>
       </div>
 
-      <!-- Latest Tweet Embed under Draw Winner -->
+      <!-- Latest Tweet Embed -->
       <section class="mt-8 text-center">
         <h3 class="text-xl font-semibold mb-4">Latest Tweet by @sui_raffle</h3>
         <blockquote class="twitter-tweet">
@@ -87,7 +81,6 @@
     </main>
   </div>
 
-  <!-- Your application logic -->
   <script src="/app.js"></script>
 </body>
 </html>
