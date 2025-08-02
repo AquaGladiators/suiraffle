@@ -64,18 +64,18 @@ function authenticate(req, res, next) {
 // ─── GRAPHQL HOLDER FETCH ────────────────────
 async function fetchRafHolders() {
   const query = `
-  query {
-    coinBalances(
-      first: 1000,
-      where: {
-        coinType: "${RAF_TYPE}",
-        totalBalance_gt: "0"
+    query {
+      coinBalances(
+        first: 1000,
+        where: {
+          coinType: "${RAF_TYPE}",
+          totalBalance_gt: "0"
+        }
+      ) {
+        ownerAddress
+        totalBalance
       }
-    ) {
-      ownerAddress
-      totalBalance
-    }
-  }`;
+    }`;
   const resp = await fetch(GRAPHQL_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -84,12 +84,12 @@ async function fetchRafHolders() {
   const json = await resp.json();
   if (json.errors) throw new Error(JSON.stringify(json.errors));
   if (!json.data || !Array.isArray(json.data.coinBalances)) {
-    throw new Error('Unexpected GraphQL shape');
+    throw new Error('Invalid GraphQL response shape');
   }
   return json.data.coinBalances
     .map(c => ({
       address: normalizeSuiAddress(c.ownerAddress),
-      count: Math.floor(Number(c.totalBalance) / MICROS_PER_TICKET)
+      count: Math.floor(Number(c.totalBalance) / MICROS_PER_TICKET),
     }))
     .filter(e => e.count > 0);
 }
@@ -102,7 +102,11 @@ app.post('/api/auth', (req, res) => {
   if (!address || !isValidSuiAddress(address)) {
     return res.status(400).json({ error: 'Invalid Sui address' });
   }
-  const token = jwt.sign({ address: normalizeSuiAddress(address) }, JWT_SECRET, { expiresIn: '1h' });
+  const token = jwt.sign(
+    { address: normalizeSuiAddress(address) },
+    JWT_SECRET,
+    { expiresIn: '1h' }
+  );
   res.json({ token });
 });
 
@@ -113,15 +117,16 @@ app.post('/api/balance', authenticate, async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
       body: JSON.stringify({
-        jsonrpc:'2.0', id:1,
-        method:'suix_getAllBalances',
-        params:[req.user.address]
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'suix_getAllBalances',
+        params: [req.user.address],
       }),
     });
-    return res.json(await rpcRes.json());
+    res.json(await rpcRes.json());
   } catch (err) {
     console.error('Balance proxy error:', err);
-    return res.status(502).json({ error: 'Fullnode RPC failed' });
+    res.status(502).json({ error: 'Fullnode RPC failed' });
   }
 });
 
@@ -148,7 +153,6 @@ app.post('/api/draw', authenticate, async (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-
   let entries;
   try {
     entries = await fetchRafHolders();
@@ -156,14 +160,12 @@ app.post('/api/draw', authenticate, async (req, res) => {
     console.error('GraphQL failed on manual draw, using disk:', err);
     entries = loadData().entries;
   }
-
   const valid = entries.filter(e => e.count > 0);
   if (!valid.length) {
     return res.status(400).json({ error: 'No entries this round' });
   }
-
   const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-  const winner = weighted[Math.floor(Math.random()*weighted.length)];
+  const winner = weighted[Math.floor(Math.random() * weighted.length)];
   saveData({ entries: [], lastWinner: winner });
   res.json({ winner });
 });
@@ -180,14 +182,14 @@ cron.schedule('0 18-23 * * *', async () => {
   const valid = entries.filter(e => e.count > 0);
   if (!valid.length) return;
   const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-  const winner = weighted[Math.floor(Math.random()*weighted.length)];
+  const winner = weighted[Math.floor(Math.random() * weighted.length)];
   console.log('🏆 Auto-draw winner:', winner);
   saveData({ entries: [], lastWinner: winner });
 });
 
 // ─── STATIC & ERROR HANDLER ─────────────────
-app.use(express.static(path.join(__dirname,'public')));
-app.use((err,_,res,_) => {
+app.use(express.static(path.join(__dirname, 'public')));
+app.use((err, _req, res, _next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
