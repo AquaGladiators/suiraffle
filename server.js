@@ -16,10 +16,10 @@ const JWT_SECRET         = process.env.JWT_SECRET;
 const ADMIN_KEY          = process.env.ADMIN_KEY;
 const DATA_FILE          = process.env.DATA_FILE  || './entries.json';
 const FULLNODE_URL       = 'https://fullnode.mainnet.sui.io:443';
-const DECIMALS           = 10 ** 6;               // RAF has 6 decimals
-const TOKENS_PER_TICKET  = 1_000_000;             // 1,000,000 RAF per ticket
-const MICROS_PER_TICKET  = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
 const GRAPHQL_URL        = process.env.SUI_INDEXER_GRAPHQL;
+const DECIMALS           = 10 ** 6;               
+const TOKENS_PER_TICKET  = 1_000_000;             
+const MICROS_PER_TICKET  = TOKENS_PER_TICKET * DECIMALS;
 const RAF_TYPE           = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
 
 if (!JWT_SECRET || !ADMIN_KEY || !GRAPHQL_URL) {
@@ -56,7 +56,8 @@ function authenticate(req, res, next) {
   try {
     req.user = jwt.verify(auth.split(' ')[1], JWT_SECRET);
     next();
-  } catch {
+  } catch (err) {
+    console.error('Auth error:', err);
     res.status(401).json({ error: 'Invalid or expired token' });
   }
 }
@@ -79,7 +80,15 @@ async function fetchRafHolders() {
     body: JSON.stringify({ query })
   });
   const json = await resp.json();
-  return json.data.rafBalances; // [{ ownerAddress, totalBalance }, ...]
+  if (json.errors) {
+    console.error('GraphQL errors:', json.errors);
+    throw new Error('GraphQL returned errors');
+  }
+  if (!json.data || !Array.isArray(json.data.rafBalances)) {
+    console.error('Unexpected GraphQL shape:', json);
+    throw new Error('Invalid GraphQL response');
+  }
+  return json.data.rafBalances;
 }
 
 // ─── AUTO‐ENTER HOLDERS ──────────────────────
@@ -98,7 +107,7 @@ async function autoEnterHolders() {
 
 // ─── ROUTES ──────────────────────────────────
 
-// Issue JWT
+// 1) Issue JWT
 app.post('/api/auth', (req, res) => {
   const { address } = req.body;
   if (!address || !isValidSuiAddress(address)) {
@@ -112,9 +121,8 @@ app.post('/api/auth', (req, res) => {
   res.json({ token });
 });
 
-// Proxy balance RPC
+// 2) Proxy balance RPC
 app.post('/api/balance', authenticate, async (req, res) => {
-  const address = req.user.address;
   try {
     const rpcRes = await fetch(FULLNODE_URL, {
       method: 'POST',
@@ -122,7 +130,7 @@ app.post('/api/balance', authenticate, async (req, res) => {
       body: JSON.stringify({
         jsonrpc: '2.0', id: 1,
         method: 'suix_getAllBalances',
-        params: [ address ],
+        params: [ req.user.address ],
       }),
     });
     const jr = await rpcRes.json();
@@ -133,47 +141,64 @@ app.post('/api/balance', authenticate, async (req, res) => {
   }
 });
 
-// List current entries (auto‐enter holders first)
+// 3) Manual enter route (no longer 404)
+app.post('/api/enter', authenticate, (req, res) => {
+  const { address: bodyAddr, count } = req.body;
+  const addr = req.user.address;
+  if (bodyAddr !== addr) return res.status(400).json({ error: 'Address mismatch' });
+  if (!Number.isInteger(count) || count < 1)
+    return res.status(400).json({ error: 'Invalid ticket count' });
+
+  const db = loadData();
+  if (db.entries.find(e => e.address === addr))
+    return res.status(400).json({ error: 'Already entered' });
+
+  db.entries.push({ address: addr, count });
+  saveData({ entries: db.entries, lastWinner: db.lastWinner });
+  res.json({ success: true, total: db.entries.reduce((s,e) => s + e.count, 0) });
+});
+
+// 4) List entries (auto‐enter holders first)
 app.get('/api/entries', async (req, res) => {
   try {
     await autoEnterHolders();
     const db = loadData();
     res.json({ entries: db.entries });
   } catch (err) {
-    console.error('Error auto‐entering holders:', err);
-    res.status(500).json({ error: 'Failed to load entries' });
+    console.error('Error loading entries:', err);
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
-// Get last winner
+// 5) Get last winner
 app.get('/api/last-winner', (req, res) => {
   const db = loadData();
   res.json({ lastWinner: db.lastWinner });
 });
 
-// Draw a winner
+// 6) Draw a winner
 app.post('/api/draw', async (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
   }
+  try {
+    await autoEnterHolders();
+    const db = loadData();
+    const valid = db.entries.filter(e => e.count > 0);
+    if (!valid.length) return res.status(400).json({ error: 'No entries this round' });
 
-  // ensure fresh entries
-  await autoEnterHolders();
+    const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
+    const winner = weighted[Math.floor(Math.random() * weighted.length)];
 
-  const db = loadData();
-  const valid = db.entries.filter(e => e.count > 0);
-  if (valid.length === 0) {
-    return res.status(400).json({ error: 'No entries this round' });
+    saveData({ entries: [], lastWinner: winner });
+    res.json({ winner });
+  } catch (err) {
+    console.error('Draw error:', err);
+    res.status(502).json({ error: 'Draw failed' });
   }
-
-  const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-  const winner = weighted[Math.floor(Math.random() * weighted.length)];
-
-  saveData({ entries: [], lastWinner: winner });
-  res.json({ winner });
 });
 
-// Cron auto‐draw hourly 18–23
+// 7) Cron auto‐draw hourly 18–23
 cron.schedule('0 18-23 * * *', async () => {
   try {
     await autoEnterHolders();
@@ -183,21 +208,21 @@ cron.schedule('0 18-23 * * *', async () => {
 
     const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
     const winner = weighted[Math.floor(Math.random() * weighted.length)];
-    console.log('🏆 Auto‐draw winner:', winner);
+    console.log('🏆 Cron auto‐draw winner:', winner);
     saveData({ entries: [], lastWinner: winner });
   } catch (err) {
-    console.error('Cron auto‐draw error:', err);
+    console.error('Cron draw error:', err);
   }
 });
 
-// Serve static UI + error handler
+// ─── STATIC & ERROR HANDLER ─────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start server
+// ─── START SERVER ───────────────────────────
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
