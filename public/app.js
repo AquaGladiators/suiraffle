@@ -51,22 +51,32 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadEntries() {
     try {
       const res = await fetch('/api/entries');
-      const { entries } = await res.json();
+      if (!res.ok) {
+        throw new Error(`Entries API returned status ${res.status}`);
+      }
+      const json = await res.json();
+      const entries = Array.isArray(json.entries) ? json.entries : [];
+
       let total = 0;
-      entriesList.innerHTML = entries.map((e,i) => {
+      entriesList.innerHTML = entries.map((e, i) => {
         total += e.count;
-        return `<li>${i+1}. ${e.address} — ${e.count} tickets</li>`;
+        return `<li>${i + 1}. ${e.address} — ${e.count} tickets</li>`;
       }).join('');
       countEl.textContent = `Total Tickets: ${total}`;
       entriesSection.classList.remove('hidden');
     } catch (err) {
       console.error('Error loading entries:', err);
+      entriesList.innerHTML = `<li class="text-red-500">Failed to load entries: ${err.message}</li>`;
+      entriesSection.classList.remove('hidden');
     }
   }
 
   async function loadLastWinner() {
     try {
       const res = await fetch('/api/last-winner');
+      if (!res.ok) {
+        throw new Error(`Last-winner API returned status ${res.status}`);
+      }
       const { lastWinner } = await res.json();
       if (lastWinner && lastWinner !== currentWinner) {
         showWinner(lastWinner);
@@ -85,7 +95,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (d <= now) d.setDate(d.getDate() + 1);
         return d;
       })
-      .reduce((a,b) => a < b ? a : b);
+      .reduce((a, b) => a < b ? a : b);
   }
 
   function startCountdown() {
@@ -95,9 +105,9 @@ document.addEventListener('DOMContentLoaded', () => {
         loadEntries();
         return;
       }
-      const h = String(Math.floor(diff/3600000)).padStart(2,'0');
-      const m = String(Math.floor((diff%3600000)/60000)).padStart(2,'0');
-      const s = String(Math.floor((diff%60000)/1000)).padStart(2,'0');
+      const h = String(Math.floor(diff / 3600000)).padStart(2,'0');
+      const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2,'0');
+      const s = String(Math.floor((diff % 60000) / 1000)).padStart(2,'0');
       countdownEl.textContent = `Next draw in: ${h}:${m}:${s}`;
     }
     update();
