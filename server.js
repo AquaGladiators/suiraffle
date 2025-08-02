@@ -19,14 +19,11 @@ const FULLNODE_URL       = 'https://fullnode.mainnet.sui.io:443';
 const DECIMALS           = 10 ** 6;               // RAF has 6 decimals
 const TOKENS_PER_TICKET  = 1_000_000;             // 1,000,000 RAF per ticket
 const MICROS_PER_TICKET  = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
+const GRAPHQL_URL        = process.env.SUI_INDEXER_GRAPHQL;
+const RAF_TYPE           = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
 
-// ─── GRAPHQL INDEXER ─────────────────────────
-// Replace with your Sui indexer GraphQL endpoint:
-const GRAPHQL_URL = process.env.SUI_INDEXER_GRAPHQL || 'https://indexer.example.com/graphql';
-const RAF_TYPE    = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
-
-if (!JWT_SECRET || !ADMIN_KEY) {
-  console.error('❌ Missing JWT_SECRET or ADMIN_KEY in .env');
+if (!JWT_SECRET || !ADMIN_KEY || !GRAPHQL_URL) {
+  console.error('❌ Missing one of JWT_SECRET, ADMIN_KEY, or SUI_INDEXER_GRAPHQL in .env');
   process.exit(1);
 }
 
@@ -89,12 +86,11 @@ async function fetchRafHolders() {
 async function autoEnterHolders() {
   const holders = await fetchRafHolders();
   const entries = holders.map(h => {
-    const raw       = Number(h.totalBalance);
-    const tickets   = Math.floor(raw / MICROS_PER_TICKET);
+    const raw     = Number(h.totalBalance);
+    const tickets = Math.floor(raw / MICROS_PER_TICKET);
     return { address: normalizeSuiAddress(h.ownerAddress), count: tickets };
   }).filter(e => e.count > 0);
 
-  // overwrite entries for this round
   const db = loadData();
   db.entries = entries;
   saveData(db);
@@ -102,7 +98,7 @@ async function autoEnterHolders() {
 
 // ─── ROUTES ──────────────────────────────────
 
-// 1) Issue JWT
+// Issue JWT
 app.post('/api/auth', (req, res) => {
   const { address } = req.body;
   if (!address || !isValidSuiAddress(address)) {
@@ -116,7 +112,7 @@ app.post('/api/auth', (req, res) => {
   res.json({ token });
 });
 
-// 2) Proxy balance RPC
+// Proxy balance RPC
 app.post('/api/balance', authenticate, async (req, res) => {
   const address = req.user.address;
   try {
@@ -137,42 +133,31 @@ app.post('/api/balance', authenticate, async (req, res) => {
   }
 });
 
-// 3) (Deprecated) Manual entry route (you can disable or keep)
-app.post('/api/enter', authenticate, (req, res) => {
-  const { address: bodyAddr, count } = req.body;
-  const addr = req.user.address;
-  if (bodyAddr !== addr) return res.status(400).json({ error: 'Address mismatch' });
-  if (!Number.isInteger(count) || count < 1)
-    return res.status(400).json({ error: 'Invalid ticket count' });
-
-  const db = loadData();
-  if (db.entries.find(e => e.address === addr))
-    return res.status(400).json({ error: 'Already entered this round' });
-
-  db.entries.push({ address: addr, count });
-  saveData({ entries: db.entries, lastWinner: db.lastWinner });
-  res.json({ success: true, total: db.entries.reduce((s,e) => s + e.count, 0) });
+// List current entries (auto‐enter holders first)
+app.get('/api/entries', async (req, res) => {
+  try {
+    await autoEnterHolders();
+    const db = loadData();
+    res.json({ entries: db.entries });
+  } catch (err) {
+    console.error('Error auto‐entering holders:', err);
+    res.status(500).json({ error: 'Failed to load entries' });
+  }
 });
 
-// 4) List entries
-app.get('/api/entries', (req, res) => {
-  const db = loadData();
-  res.json({ entries: db.entries });
-});
-
-// 5) Get last winner
+// Get last winner
 app.get('/api/last-winner', (req, res) => {
   const db = loadData();
   res.json({ lastWinner: db.lastWinner });
 });
 
-// 6) Draw a winner (auto‐enters holders first)
+// Draw a winner
 app.post('/api/draw', async (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
   }
 
-  // refresh entries from RAF holders
+  // ensure fresh entries
   await autoEnterHolders();
 
   const db = loadData();
@@ -188,7 +173,7 @@ app.post('/api/draw', async (req, res) => {
   res.json({ winner });
 });
 
-// 7) Cron auto‐draw hourly 18–23 (auto‐enters holders)
+// Cron auto‐draw hourly 18–23
 cron.schedule('0 18-23 * * *', async () => {
   try {
     await autoEnterHolders();
@@ -205,14 +190,14 @@ cron.schedule('0 18-23 * * *', async () => {
   }
 });
 
-// ─── STATIC FILES & ERROR HANDLER ──────────
+// Serve static UI + error handler
 app.use(express.static(path.join(__dirname, 'public')));
 app.use((err, req, res, next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// ─── START SERVER ───────────────────────────
+// Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
