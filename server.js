@@ -32,7 +32,11 @@ if (!fs.existsSync(DATA_FILE)) {
   fs.writeFileSync(DATA_FILE, JSON.stringify({ entries: [], lastWinner: null }, null, 2));
 }
 function loadData() {
-  return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+  try {
+    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+  } catch {
+    return { entries: [], lastWinner: null };
+  }
 }
 function saveData(db) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
@@ -102,11 +106,7 @@ app.post('/api/auth', (req, res) => {
   if (!address || !isValidSuiAddress(address)) {
     return res.status(400).json({ error: 'Invalid Sui address' });
   }
-  const token = jwt.sign(
-    { address: normalizeSuiAddress(address) },
-    JWT_SECRET,
-    { expiresIn: '1h' }
-  );
+  const token = jwt.sign({ address: normalizeSuiAddress(address) }, JWT_SECRET, { expiresIn: '1h' });
   res.json({ token });
 });
 
@@ -115,22 +115,22 @@ app.post('/api/balance', authenticate, async (req, res) => {
   try {
     const rpcRes = await fetch(FULLNODE_URL, {
       method: 'POST',
-      headers: { 'Content-Type':'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
         method: 'suix_getAllBalances',
-        params: [req.user.address],
+        params: [ req.user.address ],
       }),
     });
-    res.json(await rpcRes.json());
+    return res.json(await rpcRes.json());
   } catch (err) {
     console.error('Balance proxy error:', err);
-    res.status(502).json({ error: 'Fullnode RPC failed' });
+    return res.status(502).json({ error: 'Fullnode RPC failed' });
   }
 });
 
-// 3) List entries — live + fallback
+// 3) List entries — always live + fallback
 app.get('/api/entries', async (_req, res) => {
   try {
     const entries = await fetchRafHolders();
@@ -148,8 +148,8 @@ app.get('/api/last-winner', (_req, res) => {
   res.json({ lastWinner });
 });
 
-// 5) Manual draw — live + fallback
-app.post('/api/draw', authenticate, async (req, res) => {
+// 5) Manual draw — no JWT required, only admin key
+app.post('/api/draw', async (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
   }
@@ -165,7 +165,7 @@ app.post('/api/draw', authenticate, async (req, res) => {
     return res.status(400).json({ error: 'No entries this round' });
   }
   const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-  const winner = weighted[Math.floor(Math.random() * weighted.length)];
+  const winner   = weighted[Math.floor(Math.random() * weighted.length)];
   saveData({ entries: [], lastWinner: winner });
   res.json({ winner });
 });
@@ -182,7 +182,7 @@ cron.schedule('0 18-23 * * *', async () => {
   const valid = entries.filter(e => e.count > 0);
   if (!valid.length) return;
   const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-  const winner = weighted[Math.floor(Math.random() * weighted.length)];
+  const winner   = weighted[Math.floor(Math.random() * weighted.length)];
   console.log('🏆 Auto-draw winner:', winner);
   saveData({ entries: [], lastWinner: winner });
 });
