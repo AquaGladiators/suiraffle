@@ -80,7 +80,6 @@ async function fetchRafHolders() {
       }
     }
   }`;
-
   const resp = await fetch(GRAPHQL_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -162,10 +161,9 @@ app.post('/api/enter', authenticate, (req, res) => {
   if (!Number.isInteger(count) || count < 1) {
     return res.status(400).json({ error: 'Invalid ticket count' });
   }
-
   const db = loadData();
   if (db.entries.find(e => e.address === addr)) {
-    return res.status(400).json({ error: 'Already entered this round' });
+    return res.status(400).json({ error: 'Already entered' });
   }
   db.entries.push({ address: addr, count });
   saveData({ entries: db.entries, lastWinner: db.lastWinner });
@@ -189,26 +187,20 @@ app.get('/api/last-winner', (_req, res) => {
   res.json({ lastWinner: db.lastWinner });
 });
 
-// 6) Draw a winner
-app.post('/api/draw', async (req, res) => {
+// 6) Draw a winner (manual) — **no longer calls autoEnterHolders**
+app.post('/api/draw', (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  try {
-    await autoEnterHolders();
-    const db = loadData();
-    const valid = db.entries.filter(e => e.count > 0);
-    if (valid.length === 0) return res.status(400).json({ error: 'No entries this round' });
-
-    const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-    const winner = weighted[Math.floor(Math.random() * weighted.length)];
-
-    saveData({ entries: [], lastWinner: winner });
-    res.json({ winner });
-  } catch (err) {
-    console.error('Draw error:', err);
-    res.status(502).json({ error: 'Draw failed' });
+  const db = loadData();
+  const valid = db.entries.filter(e => e.count > 0);
+  if (valid.length === 0) {
+    return res.status(400).json({ error: 'No entries this round' });
   }
+  const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
+  const winner = weighted[Math.floor(Math.random() * weighted.length)];
+  saveData({ entries: [], lastWinner: winner });
+  res.json({ winner });
 });
 
 // 7) Cron auto‐draw hourly 18–23
@@ -218,7 +210,6 @@ cron.schedule('0 18-23 * * *', async () => {
     const db = loadData();
     const valid = db.entries.filter(e => e.count > 0);
     if (valid.length === 0) return;
-
     const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
     const winner = weighted[Math.floor(Math.random() * weighted.length)];
     console.log('🏆 Cron auto‐draw winner:', winner);
