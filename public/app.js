@@ -1,7 +1,6 @@
 // public/app.js
 
 document.addEventListener('DOMContentLoaded', () => {
-  // ─── UI REFERENCES ─────────────────────────
   const entriesSection = document.getElementById('entriesSection');
   const entriesList    = document.getElementById('entriesList');
   const countEl        = document.getElementById('count');
@@ -12,7 +11,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   let currentWinner = null;
 
-  // ─── HELPERS ───────────────────────────────
   function showWinner(addr) {
     currentWinner = addr;
     winnerBanner.textContent = `🎉 Winner: ${addr}!`;
@@ -39,7 +37,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error('Entries load failed:', err);
       entriesList.innerHTML = `<li class="text-red-500">Failed to load entries.</li>`;
-      countEl.textContent = `Total Tickets: —`;
+      countEl.textContent    = `Total Tickets: —`;
     } finally {
       entriesSection.classList.remove('hidden');
     }
@@ -86,7 +84,7 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(tick, 1000);
   }
 
-  // ─── DRAW BUTTON ───────────────────────────
+  // Draw winner button
   drawBtn.addEventListener('click', async () => {
     validationMsg.textContent = '';
     const key = prompt('Admin Key');
@@ -96,19 +94,16 @@ document.addEventListener('DOMContentLoaded', () => {
         method: 'POST',
         headers: { 'x-admin-key': key }
       });
-      if (!res.ok) {
-        const err = await res.json().catch(() => null);
-        throw new Error(err?.error || `Status ${res.status}`);
-      }
-      const { winner } = await res.json();
-      showWinner(winner);
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || `Status ${res.status}`);
+      showWinner(body.winner);
     } catch (err) {
       console.error('Draw failed:', err);
       validationMsg.textContent = `Draw error: ${err.message}`;
     }
   });
 
-  // ─── INITIALIZE ─────────────────────────────
+  // Initialize
   hideWinner();
   loadEntries();
   loadLastWinner();

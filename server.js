@@ -14,8 +14,8 @@ const PORT      = process.env.PORT      || 3000;
 const ADMIN_KEY = process.env.ADMIN_KEY;
 const DATA_FILE = process.env.DATA_FILE || './entries.json';
 
-// Blast’s GraphQL endpoint
-const GRAPHQL_URL       = 'https://sui-mainnet.blastapi.io/5ddd79fb-2df9-47ec-9d94-b82198bd6f67';
+// Blast GraphQL endpoint (live Mainnet)
+const GRAPHQL_URL = 'https://sui-mainnet.blastapi.io/5ddd79fb-2df9-47ec-9d94-b82198bd6f67';
 
 const DECIMALS          = 10 ** 6;
 const MICROS_PER_TICKET = 1_000_000 * DECIMALS;
@@ -62,7 +62,6 @@ async function fetchRafHolders() {
         total_balance
       }
     }`;
-
   const resp = await fetch(GRAPHQL_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -70,54 +69,55 @@ async function fetchRafHolders() {
   });
   const { data } = await resp.json();
   if (!data || !Array.isArray(data.coin_balances)) {
-    console.error('Invalid GraphQL response:', data);
     throw new Error('Invalid GraphQL response shape');
   }
-
   return data.coin_balances
     .map(c => ({
       address: c.owner_address.toLowerCase(),
-      count:   Math.floor(Number(c.total_balance) / MICROS_PER_TICKET),
+      count:   Math.floor(Number(c.total_balance) / MICROS_PER_TICKET)
     }))
     .filter(e => e.count > 0);
 }
 
 // ─── ROUTES ──────────────────────────────────
 
-// List live entries
+// GET /api/entries — live RAF holders
 app.get('/api/entries', async (_req, res) => {
   try {
     const entries = await fetchRafHolders();
-    // cache to disk
-    const db = loadData();
-    saveData({ entries, lastWinner: db.lastWinner });
+    // cache to disk so you always have something
+    const { lastWinner } = loadData();
+    saveData({ entries, lastWinner });
     return res.json({ entries });
   } catch (err) {
-    console.warn('GraphQL failed, falling back to disk:', err);
+    console.warn('GraphQL fetch failed, falling back to disk:', err);
     const { entries } = loadData();
     return res.json({ entries });
   }
 });
 
-// Get last winner
+// GET /api/last-winner
 app.get('/api/last-winner', (_req, res) => {
   const { lastWinner } = loadData();
   res.json({ lastWinner });
 });
 
-// Manual draw (admin only)
+// POST /api/draw — manual draw (admin only)
 app.post('/api/draw', (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
   }
+  // use fresh on-chain data if possible
   fetchRafHolders()
     .catch(err => {
-      console.warn('Draw fetch failed, using disk:', err);
+      console.warn('Draw fetch failed, falling back to disk:', err);
       return loadData().entries;
     })
     .then(entries => {
       const valid = entries.filter(e => e.count > 0);
-      if (!valid.length) return res.status(400).json({ error: 'No entries' });
+      if (!valid.length) {
+        return res.status(400).json({ error: 'No entries this round' });
+      }
       const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
       const winner   = weighted[Math.floor(Math.random() * weighted.length)];
       saveData({ entries: [], lastWinner: winner });
@@ -125,20 +125,23 @@ app.post('/api/draw', (req, res) => {
     });
 });
 
-// Auto-draw cron 18:00–23:00
+// Cron auto-draw hourly 18–23
 cron.schedule('0 18-23 * * *', async () => {
   let entries;
-  try { entries = await fetchRafHolders(); }
-  catch { entries = loadData().entries; }
+  try {
+    entries = await fetchRafHolders();
+  } catch {
+    entries = loadData().entries;
+  }
   const valid = entries.filter(e => e.count > 0);
   if (!valid.length) return;
   const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
   const winner   = weighted[Math.floor(Math.random() * weighted.length)];
-  console.log('🏆 Auto draw winner:', winner);
+  console.log('🏆 Auto-draw winner:', winner);
   saveData({ entries: [], lastWinner: winner });
 });
 
-// Error handler
+// Global error handler
 app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
@@ -146,5 +149,5 @@ app.use((err, _req, res, _next) => {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`🚀 Running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
