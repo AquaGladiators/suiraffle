@@ -17,8 +17,8 @@ const ADMIN_KEY          = process.env.ADMIN_KEY;
 const DATA_FILE          = process.env.DATA_FILE  || './entries.json';
 const FULLNODE_URL       = 'https://fullnode.mainnet.sui.io:443';
 const GRAPHQL_URL        = process.env.SUI_INDEXER_GRAPHQL;
-const DECIMALS           = 10 ** 6;               
-const TOKENS_PER_TICKET  = 1_000_000;             
+const DECIMALS           = 10 ** 6;
+const TOKENS_PER_TICKET  = 1_000_000;
 const MICROS_PER_TICKET  = TOKENS_PER_TICKET * DECIMALS;
 const RAF_TYPE           = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
 
@@ -85,7 +85,7 @@ async function fetchRafHolders() {
     throw new Error('GraphQL returned errors');
   }
   if (!json.data || !Array.isArray(json.data.rafBalances)) {
-    console.error('Unexpected GraphQL shape:', json);
+    console.error('Unexpected GraphQL response shape:', json);
     throw new Error('Invalid GraphQL response');
   }
   return json.data.rafBalances;
@@ -141,7 +141,7 @@ app.post('/api/balance', authenticate, async (req, res) => {
   }
 });
 
-// 3) Manual enter route (no longer 404)
+// 3) Manual enter route (still available)
 app.post('/api/enter', authenticate, (req, res) => {
   const { address: bodyAddr, count } = req.body;
   const addr = req.user.address;
@@ -151,27 +151,27 @@ app.post('/api/enter', authenticate, (req, res) => {
 
   const db = loadData();
   if (db.entries.find(e => e.address === addr))
-    return res.status(400).json({ error: 'Already entered' });
+    return res.status(400).json({ error: 'Already entered this round' });
 
   db.entries.push({ address: addr, count });
   saveData({ entries: db.entries, lastWinner: db.lastWinner });
   res.json({ success: true, total: db.entries.reduce((s,e) => s + e.count, 0) });
 });
 
-// 4) List entries (auto‐enter holders first)
-app.get('/api/entries', async (req, res) => {
+// 4) List entries – always returns an array
+app.get('/api/entries', async (_req, res) => {
   try {
     await autoEnterHolders();
-    const db = loadData();
-    res.json({ entries: db.entries });
   } catch (err) {
-    console.error('Error loading entries:', err);
-    res.status(500).json({ error: 'Internal server error' });
+    console.error('autoEnterHolders failed:', err);
+    // swallow error and continue with stale entries
   }
+  const db = loadData();
+  res.json({ entries: db.entries });
 });
 
 // 5) Get last winner
-app.get('/api/last-winner', (req, res) => {
+app.get('/api/last-winner', (_req, res) => {
   const db = loadData();
   res.json({ lastWinner: db.lastWinner });
 });
@@ -217,7 +217,7 @@ cron.schedule('0 18-23 * * *', async () => {
 
 // ─── STATIC & ERROR HANDLER ─────────────────
 app.use(express.static(path.join(__dirname, 'public')));
-app.use((err, req, res, next) => {
+app.use((err, _req, res, _next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
 });
