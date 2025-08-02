@@ -15,7 +15,7 @@ const ADMIN_KEY = process.env.ADMIN_KEY;
 const DATA_FILE = process.env.DATA_FILE || './entries.json';
 
 // Point this at your Blast GraphQL endpoint:
-// e.g. SUI_INDEXER_GRAPHQL=https://sui-mainnet.blastapi.io/5ddd79fb-2df9-47ec-9d94-b82198bd6f67
+// e.g. SUI_INDEXER_GRAPHQL=
 const GRAPHQL_URL = process.env.SUI_INDEXER_GRAPHQL;
 if (!GRAPHQL_URL) {
   console.error('❌ Missing SUI_INDEXER_GRAPHQL in .env');
