@@ -15,7 +15,7 @@ const ADMIN_KEY = process.env.ADMIN_KEY;
 const DATA_FILE = process.env.DATA_FILE || './entries.json';
 
 // Blast GraphQL endpoint (live Mainnet)
-const GRAPHQL_URL = 'https://sui-mainnet.blastapi.io/5ddd79fb-2df9-47ec-9d94-b82198bd6f67';
+const GRAPHQL_URL = 'https://frequent-wandering-glitter.sui-mainnet.quiknode.pro/595341be6a21bec10336c3c09c76b76237ac5691/';
 
 const DECIMALS          = 10 ** 6;
 const MICROS_PER_TICKET = 1_000_000 * DECIMALS;
