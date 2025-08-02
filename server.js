@@ -1,82 +1,44 @@
+// server.js
+
 require('dotenv').config();
-const express = require('express');
-const path    = require('path');
+const express    = require('express');
+const path       = require('path');
 const bodyParser = require('body-parser');
-const cors    = require('cors');
-const jwt     = require('jsonwebtoken');
-const fs      = require('fs');
-const cron    = require('node-cron');
-const fetch   = require('node-fetch');
+const cors       = require('cors');
+const fs         = require('fs');
+const cron       = require('node-cron');
+const fetch      = require('node-fetch').default;
 
 // ─── CONFIG ───────────────────────────────────
-const PORT       = process.env.PORT || 3000;
-const JWT_SECRET = process.env.JWT_SECRET;
-const ADMIN_KEY  = process.env.ADMIN_KEY;
-const DATA_FILE  = process.env.DATA_FILE || './entries.json';
-const GRAPHQL_URL = process.env.SUI_INDEXER_GRAPHQL || 'https://graphql-beta.mainnet.sui.io';
+const PORT              = process.env.PORT      || 3000;
+const ADMIN_KEY         = process.env.ADMIN_KEY;
+const DATA_FILE         = process.env.DATA_FILE || './entries.json';
 
-// ─── VALIDATION ──────────────────────────────
-if (!JWT_SECRET || !ADMIN_KEY) {
-  console.error('❌ Missing JWT_SECRET or ADMIN_KEY in .env');
+// Your Blast GraphQL endpoint:
+const GRAPHQL_URL       = 'https://sui-mainnet.blastapi.io/5ddd79fb-2df9-47ec-9d94-b82198bd6f67';
+
+const DECIMALS          = 10 ** 6;
+const MICROS_PER_TICKET = 1_000_000 * DECIMALS;
+const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
+
+if (!ADMIN_KEY) {
+  console.error('❌ Missing ADMIN_KEY in .env');
   process.exit(1);
 }
-
-// ─── Sui & RAF constants ──────────────────────
-const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
-const DECIMALS          = 10 ** 6;           // RAF has 6 decimals
-const TOKENS_PER_TICKET = 1_000_000;         // 1,000,000 RAF per ticket
-const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12
 
 // ─── STORAGE HELPERS ─────────────────────────
 if (!fs.existsSync(DATA_FILE)) {
   fs.writeFileSync(DATA_FILE, JSON.stringify({ entries: [], lastWinner: null }, null, 2));
 }
 function loadData() {
-  return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+  try {
+    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+  } catch {
+    return { entries: [], lastWinner: null };
+  }
 }
 function saveData(db) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
-}
-
-// ─── GRAPHQL HOLDER FETCH ────────────────────
-async function fetchRafHolders() {
-  const holders = new Map();
-  let cursor = null, hasNext = true;
-
-  while (hasNext) {
-    const query = `
-      query ($cursor: String) {
-        coins(type: "${RAF_TYPE}", first: 1000, after: $cursor) {
-          pageInfo { hasNextPage endCursor }
-          edges {
-            node {
-              owner { address }
-            }
-          }
-        }
-      }
-    `;
-    const res = await fetch(GRAPHQL_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query, variables: { cursor } })
-    });
-    const json = await res.json();
-    if (!json.data || !json.data.coins) {
-      throw new Error('Invalid GraphQL response shape');
-    }
-
-    const { edges, pageInfo } = json.data.coins;
-    for (const { node } of edges) {
-      const addr = node.owner.address.toLowerCase();
-      holders.set(addr, (holders.get(addr) || 0) + 1);
-    }
-    hasNext = pageInfo.hasNextPage;
-    cursor  = pageInfo.endCursor;
-  }
-
-  // Convert to array of { address, count }
-  return Array.from(holders.entries()).map(([address, count]) => ({ address, count }));
 }
 
 // ─── EXPRESS SETUP ────────────────────────────
@@ -85,129 +47,127 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── JWT MIDDLEWARE & UTILITIES ──────────────
-function isValidSuiAddress(a) {
-  return /^0x[a-fA-F0-9]{64}$/.test(a);
-}
-function normalize(a) {
-  return a.trim().toLowerCase();
-}
-function authenticate(req, res, next) {
-  const h = req.headers.authorization;
-  if (!h) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    req.user = jwt.verify(h.split(' ')[1], JWT_SECRET);
-    next();
-  } catch {
-    res.status(401).json({ error: 'Invalid or expired token' });
+// ─── GRAPHQL HOLDER FETCH ────────────────────
+async function fetchRafHolders() {
+  const query = `
+    query {
+      coin_balances(
+        limit: 1000,
+        where: {
+          coinType: { _eq: "${RAF_TYPE}" },
+          totalBalance: { _gt: "0" }
+        }
+      ) {
+        ownerAddress
+        totalBalance
+      }
+      coinBalances: coinBalances(
+        limit: 1000,
+        where: {
+          coinType: "${RAF_TYPE}",
+          totalBalance_gt: "0"
+        }
+      ) {
+        ownerAddress
+        totalBalance
+      }
+    }`;
+
+  const resp = await fetch(GRAPHQL_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query }),
+  });
+  const json = await resp.json();
+
+  // pick whichever array exists
+  const raw = Array.isArray(json.data.coin_balances)
+    ? json.data.coin_balances
+    : Array.isArray(json.data.coinBalances)
+      ? json.data.coinBalances
+      : null;
+
+  if (!raw) {
+    console.error('Unexpected GraphQL response shape:', json);
+    throw new Error('Invalid GraphQL response shape');
   }
+
+  return raw
+    .map(c => ({
+      address: c.ownerAddress.toLowerCase(),
+      count:   Math.floor(Number(c.totalBalance) / MICROS_PER_TICKET)
+    }))
+    .filter(e => e.count > 0);
 }
 
 // ─── ROUTES ──────────────────────────────────
 
-// Force-refresh entries.json from chain
-app.post('/api/refresh', async (req, res) => {
+// GET /api/entries — live holders
+app.get('/api/entries', async (_req, res) => {
   try {
     const entries = await fetchRafHolders();
+    // save to disk as cache
     const db = loadData();
     saveData({ entries, lastWinner: db.lastWinner });
-    return res.json({ success: true, total: entries.length });
+    return res.json({ entries });
   } catch (err) {
     console.error('Blast fetch failed, falling back to disk:', err);
-    return res.status(500).json({ error: 'Failed to fetch live holders' });
+    const { entries } = loadData();
+    return res.json({ entries });
   }
 });
 
-// Issue JWT
-app.post('/api/auth', (req, res) => {
-  const { address } = req.body;
-  if (!address || !isValidSuiAddress(address)) {
-    return res.status(400).json({ error: 'Invalid Sui address' });
-  }
-  const token = jwt.sign({ address: normalize(address) }, JWT_SECRET, { expiresIn: '1h' });
-  res.json({ token });
-});
-
-// Enter raffle manually
-app.post('/api/enter', authenticate, (req, res) => {
-  const { address: bodyAddr, count } = req.body;
-  const addr = req.user.address;
-  if (bodyAddr !== addr) return res.status(400).json({ error: 'Address mismatch' });
-  if (!Number.isInteger(count) || count < 1)
-    return res.status(400).json({ error: 'Invalid ticket count' });
-
-  const db = loadData();
-  if (db.entries.find(e => e.address === addr))
-    return res.status(400).json({ error: 'Already entered this round' });
-
-  db.entries.push({ address: addr, count });
-  saveData({ entries: db.entries, lastWinner: db.lastWinner });
-  res.json({ success: true, total: db.entries.length });
-});
-
-// Get current entries (auto-loaded)
-app.get('/api/entries', async (req, res) => {
-  try {
-    // Always show fresh on-chain holders if possible
-    const entries = await fetchRafHolders();
-    // Save to disk for fallback
-    const db = loadData();
-    saveData({ entries, lastWinner: db.lastWinner });
-    res.json({ entries });
-  } catch {
-    const db = loadData();
-    res.json({ entries: db.entries });
-  }
-});
-
-// Get last winner
-app.get('/api/last-winner', (req, res) => {
+// GET /api/last-winner
+app.get('/api/last-winner', (_req, res) => {
   const { lastWinner } = loadData();
   res.json({ lastWinner });
 });
 
-// Draw winner (manual)
+// POST /api/draw — manual draw with admin key
 app.post('/api/draw', (req, res) => {
-  if (req.headers['x-admin-key'] !== ADMIN_KEY)
+  if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
-
-  const db = loadData();
-  if (!db.entries.length) return res.status(400).json({ error: 'No entries to draw' });
-
-  const weighted = [];
-  db.entries.forEach(e => {
-    for (let i = 0; i < e.count; i++) weighted.push(e.address);
-  });
-  const winner = weighted[Math.floor(Math.random() * weighted.length)];
-  saveData({ entries: [], lastWinner: winner });
-  res.json({ winner });
+  }
+  fetchRafHolders()
+    .catch(err => {
+      console.error('Fetch on draw failed, using disk:', err);
+      return loadData().entries;
+    })
+    .then(entries => {
+      const valid = entries.filter(e => e.count > 0);
+      if (!valid.length) {
+        return res.status(400).json({ error: 'No entries this round' });
+      }
+      const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
+      const winner   = weighted[Math.floor(Math.random() * weighted.length)];
+      saveData({ entries: [], lastWinner: winner });
+      res.json({ winner });
+    });
 });
 
-// Auto-draw & reset hourly 18-23
+// Cron auto-draw hourly 18–23
 cron.schedule('0 18-23 * * *', async () => {
+  let entries;
   try {
-    const entries = await fetchRafHolders();
-    if (!entries.length) return;
-    // pick winner
-    const weighted = [];
-    entries.forEach(e => {
-      for (let i = 0; i < e.count; i++) weighted.push(e.address);
-    });
-    const winner = weighted[Math.floor(Math.random() * weighted.length)];
-    console.log('🏆 Auto draw winner:', winner);
-    saveData({ entries: [], lastWinner: winner });
-  } catch (err) {
-    console.error('Auto-draw failed:', err);
+    entries = await fetchRafHolders();
+  } catch {
+    entries = loadData().entries;
   }
+  const valid = entries.filter(e => e.count > 0);
+  if (!valid.length) return;
+  const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
+  const winner   = weighted[Math.floor(Math.random() * weighted.length)];
+  console.log('🏆 Auto-draw winner:', winner);
+  saveData({ entries: [], lastWinner: winner });
 });
 
 // Error handler
-app.use((err, req, res, next) => {
+app.use((err, _req, res, _next) => {
   console.error(err);
   res.status(500).json({ error: 'Internal server error' });
 });
 
-// Start
+// Start server
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
