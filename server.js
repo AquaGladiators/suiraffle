@@ -13,22 +13,18 @@ const fetch      = require('node-fetch').default;
 const PORT      = process.env.PORT      || 3000;
 const ADMIN_KEY = process.env.ADMIN_KEY;
 const DATA_FILE = process.env.DATA_FILE || './entries.json';
+const GRAPHQL_URL = process.env.SUI_INDEXER_GRAPHQL || 'https://graphql-rpc.mainnet.sui.io/graphql';
 
-// Point this at your Blast GraphQL endpoint:
-// e.g. SUI_INDEXER_GRAPHQL=
-const GRAPHQL_URL = process.env.SUI_INDEXER_GRAPHQL;
-if (!GRAPHQL_URL) {
-  console.error('❌ Missing SUI_INDEXER_GRAPHQL in .env');
-  process.exit(1);
-}
 if (!ADMIN_KEY) {
-  console.error('❌ Missing ADMIN_KEY in .env');
+  console.error('❌ Missing ADMIN_KEY in environment');
   process.exit(1);
 }
 
-const DECIMALS          = 10 ** 6;
-const MICROS_PER_TICKET = 1_000_000 * DECIMALS;
+// ─── Sui & RAF constants ──────────────────────
 const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
+const DECIMALS          = 10 ** 6;
+const TOKENS_PER_TICKET = 1_000_000;
+const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS;
 
 // ─── STORAGE HELPERS ─────────────────────────
 if (!fs.existsSync(DATA_FILE)) {
@@ -53,43 +49,60 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 // ─── GRAPHQL HOLDER FETCH ────────────────────
 async function fetchRafHolders() {
-  const query = `
-    query {
-      coin_balances(
-        limit: 1000,
-        where: {
-          coin_type: { _eq: "${RAF_TYPE}" },
-          total_balance: { _gt: "0" }
+  const holders = new Map();
+  let after = null;
+
+  while (true) {
+    const query = `
+      query raf($after: String) {
+        coinBalances(
+          first: 1000,
+          after: $after,
+          filter: {
+            coinType: { equalTo: "${RAF_TYPE}" },
+            totalBalance: { greaterThan: "0" }
+          }
+        ) {
+          pageInfo { hasNextPage endCursor }
+          nodes { ownerAddress totalBalance }
         }
-      ) {
-        owner_address
-        total_balance
       }
-    }`;
+    `;
+    const resp = await fetch(GRAPHQL_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query, variables: { after } }),
+    });
+    const { data, errors } = await resp.json();
+    if (errors) {
+      console.error('GraphQL errors:', errors);
+      throw new Error('GraphQL error');
+    }
+    const page = data?.coinBalances;
+    if (!page?.nodes) {
+      console.error('Unexpected GraphQL response shape:', data);
+      throw new Error('Invalid GraphQL response shape');
+    }
 
-  const resp = await fetch(GRAPHQL_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query }),
-  });
+    // tally
+    for (const { ownerAddress, totalBalance } of page.nodes) {
+      const addr = ownerAddress.toLowerCase();
+      const count = Math.floor(Number(totalBalance) / MICROS_PER_TICKET);
+      if (count > 0) {
+        holders.set(addr, (holders.get(addr) || 0) + count);
+      }
+    }
 
-  const { data } = await resp.json();
-  if (!data || !Array.isArray(data.coin_balances)) {
-    console.error('Invalid GraphQL response:', data);
-    throw new Error('Invalid GraphQL response shape');
+    if (!page.pageInfo.hasNextPage) break;
+    after = page.pageInfo.endCursor;
   }
 
-  return data.coin_balances
-    .map(c => ({
-      address: c.owner_address.toLowerCase(),
-      count:   Math.floor(Number(c.total_balance) / MICROS_PER_TICKET)
-    }))
-    .filter(e => e.count > 0);
+  return Array.from(holders.entries()).map(([address, count]) => ({ address, count }));
 }
 
 // ─── ROUTES ──────────────────────────────────
 
-// GET /api/entries — live RAF holders (fallback to disk)
+// GET /api/entries — fetch live holders, fallback to disk
 app.get('/api/entries', async (_req, res) => {
   try {
     const entries = await fetchRafHolders();
@@ -125,7 +138,7 @@ app.post('/api/draw', (req, res) => {
         return res.status(400).json({ error: 'No entries this round' });
       }
       const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-      const winner   = weighted[Math.floor(Math.random() * weighted.length)];
+      const winner = weighted[Math.floor(Math.random() * weighted.length)];
       saveData({ entries: [], lastWinner: winner });
       res.json({ winner });
     });
@@ -142,7 +155,7 @@ cron.schedule('0 18-23 * * *', async () => {
   const valid = entries.filter(e => e.count > 0);
   if (!valid.length) return;
   const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-  const winner   = weighted[Math.floor(Math.random() * weighted.length)];
+  const winner = weighted[Math.floor(Math.random() * weighted.length)];
   console.log('🏆 Auto-draw winner:', winner);
   saveData({ entries: [], lastWinner: winner });
 });
