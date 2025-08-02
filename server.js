@@ -14,17 +14,21 @@ const PORT      = process.env.PORT      || 3000;
 const ADMIN_KEY = process.env.ADMIN_KEY;
 const DATA_FILE = process.env.DATA_FILE || './entries.json';
 
-// Blast GraphQL endpoint (live Mainnet)
-const GRAPHQL_URL = 'https://frequent-wandering-glitter.sui-mainnet.quiknode.pro/595341be6a21bec10336c3c09c76b76237ac5691/';
-
-const DECIMALS          = 10 ** 6;
-const MICROS_PER_TICKET = 1_000_000 * DECIMALS;
-const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
-
+// Point this at your Blast GraphQL endpoint:
+// e.g. SUI_INDEXER_GRAPHQL=https://sui-mainnet.blastapi.io/5ddd79fb-2df9-47ec-9d94-b82198bd6f67
+const GRAPHQL_URL = process.env.SUI_INDEXER_GRAPHQL;
+if (!GRAPHQL_URL) {
+  console.error('❌ Missing SUI_INDEXER_GRAPHQL in .env');
+  process.exit(1);
+}
 if (!ADMIN_KEY) {
   console.error('❌ Missing ADMIN_KEY in .env');
   process.exit(1);
 }
+
+const DECIMALS          = 10 ** 6;
+const MICROS_PER_TICKET = 1_000_000 * DECIMALS;
+const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
 
 // ─── STORAGE HELPERS ─────────────────────────
 if (!fs.existsSync(DATA_FILE)) {
@@ -62,15 +66,19 @@ async function fetchRafHolders() {
         total_balance
       }
     }`;
+
   const resp = await fetch(GRAPHQL_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ query }),
   });
+
   const { data } = await resp.json();
   if (!data || !Array.isArray(data.coin_balances)) {
+    console.error('Invalid GraphQL response:', data);
     throw new Error('Invalid GraphQL response shape');
   }
+
   return data.coin_balances
     .map(c => ({
       address: c.owner_address.toLowerCase(),
@@ -81,11 +89,10 @@ async function fetchRafHolders() {
 
 // ─── ROUTES ──────────────────────────────────
 
-// GET /api/entries — live RAF holders
+// GET /api/entries — live RAF holders (fallback to disk)
 app.get('/api/entries', async (_req, res) => {
   try {
     const entries = await fetchRafHolders();
-    // cache to disk so you always have something
     const { lastWinner } = loadData();
     saveData({ entries, lastWinner });
     return res.json({ entries });
@@ -107,7 +114,6 @@ app.post('/api/draw', (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  // use fresh on-chain data if possible
   fetchRafHolders()
     .catch(err => {
       console.warn('Draw fetch failed, falling back to disk:', err);
