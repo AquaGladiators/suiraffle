@@ -39,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       console.error('Entries load failed:', err);
       entriesList.innerHTML = `<li class="text-red-500">Failed to load entries.</li>`;
-      countEl.textContent    = `Total Tickets: —`;
+      countEl.textContent = `Total Tickets: —`;
     } finally {
       entriesSection.classList.remove('hidden');
     }
@@ -63,11 +63,11 @@ document.addEventListener('DOMContentLoaded', () => {
     return [18,19,20,21,22,23]
       .map(h => {
         const d = new Date(now);
-        d.setHours(h, 0, 0, 0);
-        if (d <= now) d.setDate(d.getDate() + 1);
+        d.setHours(h,0,0,0);
+        if (d <= now) d.setDate(d.getDate()+1);
         return d;
       })
-      .reduce((a, b) => a < b ? a : b);
+      .reduce((a,b) => a < b ? a : b);
   }
 
   function startCountdown() {
@@ -77,9 +77,9 @@ document.addEventListener('DOMContentLoaded', () => {
         loadEntries();
         return;
       }
-      const h = String(Math.floor(diff / 3600000)).padStart(2,'0');
-      const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2,'0');
-      const s = String(Math.floor((diff % 60000) / 1000)).padStart(2,'0');
+      const h = String(Math.floor(diff/3600000)).padStart(2,'0');
+      const m = String(Math.floor((diff%3600000)/60000)).padStart(2,'0');
+      const s = String(Math.floor((diff%60000)/1000)).padStart(2,'0');
       countdownEl.textContent = `Next draw in: ${h}:${m}:${s}`;
     }
     tick();

@@ -23,7 +23,6 @@ const DECIMALS          = 10 ** 6;
 const MICROS_PER_TICKET = 1_000_000 * DECIMALS;
 const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
 
-// ─── VERIFY ENV ──────────────────────────────
 if (!JWT_SECRET || !ADMIN_KEY) {
   console.error('❌ Missing JWT_SECRET or ADMIN_KEY in .env');
   process.exit(1);
@@ -34,8 +33,8 @@ if (!fs.existsSync(DATA_FILE)) {
   fs.writeFileSync(DATA_FILE, JSON.stringify({ entries: [], lastWinner: null }, null, 2));
 }
 function loadData() {
-  try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
+  try { 
+    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')); 
   } catch {
     return { entries: [], lastWinner: null };
   }
@@ -53,7 +52,7 @@ app.use(bodyParser.json());
 async function fetchRafHolders() {
   const query = `
     query {
-      coinBalances(
+      coin_balances(
         limit: 1000,
         where: {
           coinType: { _eq: "${RAF_TYPE}" },
@@ -71,10 +70,13 @@ async function fetchRafHolders() {
     body: JSON.stringify({ query }),
   });
   const json = await resp.json();
-  if (!json.data || !Array.isArray(json.data.coinBalances)) {
-    throw new Error('Invalid GraphQL response');
+
+  // this will now pick up the correct field
+  if (!json.data || !Array.isArray(json.data.coin_balances)) {
+    throw new Error('Invalid GraphQL response shape');
   }
-  return json.data.coinBalances
+
+  return json.data.coin_balances
     .map(c => ({
       address: c.ownerAddress.toLowerCase(),
       count:   Math.floor(Number(c.totalBalance) / MICROS_PER_TICKET)
@@ -84,14 +86,15 @@ async function fetchRafHolders() {
 
 // ─── ROUTES ──────────────────────────────────
 
-// 1) List entries
+// 1) List entries — try live, else fallback to disk
 app.get('/api/entries', async (_req, res) => {
   try {
     const entries = await fetchRafHolders();
     return res.json({ entries });
   } catch (err) {
-    console.error('Blast fetch failed:', err);
-    return res.status(500).json({ error: 'Could not fetch holders' });
+    console.error('Blast fetch failed, falling back to disk:', err);
+    const { entries } = loadData();
+    return res.json({ entries });
   }
 });
 
@@ -101,7 +104,7 @@ app.get('/api/last-winner', (_req, res) => {
   res.json({ lastWinner });
 });
 
-// 3) Manual draw (admin key)
+// 3) Manual draw (admin key only)
 app.post('/api/draw', (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
@@ -113,7 +116,7 @@ app.post('/api/draw', (req, res) => {
     })
     .then(entries => {
       const valid = entries.filter(e => e.count > 0);
-      if (!valid.length) return res.status(400).json({ error: 'No entries this round' });
+      if (!valid.length) return res.status(400).json({ error: 'No entries' });
       const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
       const winner   = weighted[Math.floor(Math.random() * weighted.length)];
       saveData({ entries: [], lastWinner: winner });
@@ -124,11 +127,8 @@ app.post('/api/draw', (req, res) => {
 // 4) Cron auto-draw hourly 18–23
 cron.schedule('0 18-23 * * *', async () => {
   let entries;
-  try {
-    entries = await fetchRafHolders();
-  } catch {
-    entries = loadData().entries;
-  }
+  try { entries = await fetchRafHolders(); }
+  catch { entries = loadData().entries; }
   const valid = entries.filter(e => e.count > 0);
   if (!valid.length) return;
   const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
