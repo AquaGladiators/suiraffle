@@ -13,7 +13,7 @@ const fetch      = require('node-fetch').default;
 const PORT        = process.env.PORT      || 3000;
 const ADMIN_KEY   = process.env.ADMIN_KEY;
 const DATA_FILE   = process.env.DATA_FILE || './entries.json';
-// Default to Sui’s public GraphQL RPC if no env var provided:
+// Use the official Sui GraphQL RPC by default
 const GRAPHQL_URL = process.env.SUI_INDEXER_GRAPHQL || 'https://sui-mainnet.mystenlabs.com/graphql';
 
 if (!ADMIN_KEY) {
@@ -42,11 +42,29 @@ function saveData(db) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
 }
 
+// ─── QUICK CONNECTIVITY TEST ─────────────────
+(async () => {
+  try {
+    const res = await fetch(GRAPHQL_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: `{ __typename }` })
+    });
+    const j = await res.json();
+    console.log('✅ GraphQL RPC reachable:', j);
+  } catch (err) {
+    console.error('❌ Cannot reach GraphQL RPC:', err);
+  }
+})();
+
 // ─── EXPRESS SETUP ────────────────────────────
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Health-check endpoint
+app.get('/healthz', (_req, res) => res.send('OK'));
 
 // ─── GRAPHQL HOLDER FETCH ────────────────────
 async function fetchRafHolders() {
@@ -78,7 +96,6 @@ async function fetchRafHolders() {
 
     const { data, errors } = await resp.json();
 
-    // If GraphQL returns errors, bail out to disk fallback
     if (errors) {
       console.warn('GraphQL errors (ignoring and falling back):', errors);
       return [];
@@ -90,7 +107,6 @@ async function fetchRafHolders() {
       return [];
     }
 
-    // Tally each holder
     for (const { ownerAddress, totalBalance } of page.nodes) {
       const addr = ownerAddress.toLowerCase();
       const count = Math.floor(Number(totalBalance) / MICROS_PER_TICKET);
@@ -99,12 +115,10 @@ async function fetchRafHolders() {
       }
     }
 
-    // Pagination break
     if (!page.pageInfo.hasNextPage) break;
     after = page.pageInfo.endCursor;
   }
 
-  // Convert to array format
   return Array.from(holders.entries()).map(([address, count]) => ({ address, count }));
 }
 
