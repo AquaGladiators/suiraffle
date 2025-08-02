@@ -20,6 +20,11 @@ const DECIMALS           = 10 ** 6;               // RAF has 6 decimals
 const TOKENS_PER_TICKET  = 1_000_000;             // 1,000,000 RAF per ticket
 const MICROS_PER_TICKET  = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
 
+// ─── GRAPHQL INDEXER ─────────────────────────
+// Replace with your Sui indexer GraphQL endpoint:
+const GRAPHQL_URL = process.env.SUI_INDEXER_GRAPHQL || 'https://indexer.example.com/graphql';
+const RAF_TYPE    = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
+
 if (!JWT_SECRET || !ADMIN_KEY) {
   console.error('❌ Missing JWT_SECRET or ADMIN_KEY in .env');
   process.exit(1);
@@ -59,9 +64,45 @@ function authenticate(req, res, next) {
   }
 }
 
+// ─── GRAPHQL FETCH ───────────────────────────
+async function fetchRafHolders() {
+  const query = `
+    query {
+      rafBalances: coinBalances(
+        where: { coinType: "${RAF_TYPE}", totalBalance_gt: "0" }
+      ) {
+        ownerAddress
+        totalBalance
+      }
+    }
+  `;
+  const resp = await fetch(GRAPHQL_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query })
+  });
+  const json = await resp.json();
+  return json.data.rafBalances; // [{ ownerAddress, totalBalance }, ...]
+}
+
+// ─── AUTO‐ENTER HOLDERS ──────────────────────
+async function autoEnterHolders() {
+  const holders = await fetchRafHolders();
+  const entries = holders.map(h => {
+    const raw       = Number(h.totalBalance);
+    const tickets   = Math.floor(raw / MICROS_PER_TICKET);
+    return { address: normalizeSuiAddress(h.ownerAddress), count: tickets };
+  }).filter(e => e.count > 0);
+
+  // overwrite entries for this round
+  const db = loadData();
+  db.entries = entries;
+  saveData(db);
+}
+
 // ─── ROUTES ──────────────────────────────────
 
-// 1) Issue JWT for a valid Sui address
+// 1) Issue JWT
 app.post('/api/auth', (req, res) => {
   const { address } = req.body;
   if (!address || !isValidSuiAddress(address)) {
@@ -75,7 +116,7 @@ app.post('/api/auth', (req, res) => {
   res.json({ token });
 });
 
-// 2) Proxy balance RPC (avoids CORS/429)
+// 2) Proxy balance RPC
 app.post('/api/balance', authenticate, async (req, res) => {
   const address = req.user.address;
   try {
@@ -83,10 +124,9 @@ app.post('/api/balance', authenticate, async (req, res) => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
+        jsonrpc: '2.0', id: 1,
         method: 'suix_getAllBalances',
-        params: [address],
+        params: [ address ],
       }),
     });
     const jr = await rpcRes.json();
@@ -97,7 +137,7 @@ app.post('/api/balance', authenticate, async (req, res) => {
   }
 });
 
-// 3) Enter the raffle
+// 3) (Deprecated) Manual entry route (you can disable or keep)
 app.post('/api/enter', authenticate, (req, res) => {
   const { address: bodyAddr, count } = req.body;
   const addr = req.user.address;
@@ -126,11 +166,14 @@ app.get('/api/last-winner', (req, res) => {
   res.json({ lastWinner: db.lastWinner });
 });
 
-// 6) Draw a winner
-app.post('/api/draw', (req, res) => {
+// 6) Draw a winner (auto‐enters holders first)
+app.post('/api/draw', async (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
   }
+
+  // refresh entries from RAF holders
+  await autoEnterHolders();
 
   const db = loadData();
   const valid = db.entries.filter(e => e.count > 0);
@@ -145,16 +188,21 @@ app.post('/api/draw', (req, res) => {
   res.json({ winner });
 });
 
-// 7) Cron auto-draw hourly 18–23
-cron.schedule('0 18-23 * * *', () => {
-  const db = loadData();
-  const valid = db.entries.filter(e => e.count > 0);
-  if (!valid.length) return;
+// 7) Cron auto‐draw hourly 18–23 (auto‐enters holders)
+cron.schedule('0 18-23 * * *', async () => {
+  try {
+    await autoEnterHolders();
+    const db = loadData();
+    const valid = db.entries.filter(e => e.count > 0);
+    if (!valid.length) return;
 
-  const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-  const winner = weighted[Math.floor(Math.random() * weighted.length)];
-  console.log('🏆 Auto-draw winner:', winner);
-  saveData({ entries: [], lastWinner: winner });
+    const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
+    const winner = weighted[Math.floor(Math.random() * weighted.length)];
+    console.log('🏆 Auto‐draw winner:', winner);
+    saveData({ entries: [], lastWinner: winner });
+  } catch (err) {
+    console.error('Cron auto‐draw error:', err);
+  }
 });
 
 // ─── STATIC FILES & ERROR HANDLER ──────────
