@@ -11,19 +11,21 @@ const cron       = require('node-cron');
 const fetch      = require('node-fetch');
 
 // ─── CONFIG ───────────────────────────────────
-const PORT              = process.env.PORT       || 3000;
+const PORT              = process.env.PORT      || 3000;
 const JWT_SECRET        = process.env.JWT_SECRET;
 const ADMIN_KEY         = process.env.ADMIN_KEY;
-const DATA_FILE         = process.env.DATA_FILE  || './entries.json';
+const DATA_FILE         = process.env.DATA_FILE || './entries.json';
+
+// **Your Blast GraphQL endpoint hard-coded here:**
+const GRAPHQL_URL       = 'https://sui-mainnet.blastapi.io/5ddd79fb-2df9-47ec-9d94-b82198bd6f67';
+
 const FULLNODE_URL      = 'https://fullnode.mainnet.sui.io:443';
-const GRAPHQL_URL       = process.env.SUI_INDEXER_GRAPHQL;
 const DECIMALS          = 10 ** 6;
-const TOKENS_PER_TICKET = 1_000_000;
-const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS;
+const MICROS_PER_TICKET = 1_000_000 * DECIMALS;
 const RAF_TYPE          = '0x0eb83b809fe19e7bf41fda5750bf1c770bd015d0428ece1d37c95e69d62bbf96::raf::RAF';
 
-if (!JWT_SECRET || !ADMIN_KEY || !GRAPHQL_URL) {
-  console.error('❌ Missing JWT_SECRET, ADMIN_KEY, or SUI_INDEXER_GRAPHQL in .env');
+if (!JWT_SECRET || !ADMIN_KEY) {
+  console.error('❌ Missing JWT_SECRET or ADMIN_KEY in .env');
   process.exit(1);
 }
 
@@ -32,11 +34,8 @@ if (!fs.existsSync(DATA_FILE)) {
   fs.writeFileSync(DATA_FILE, JSON.stringify({ entries: [], lastWinner: null }, null, 2));
 }
 function loadData() {
-  try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
-  } catch {
-    return { entries: [], lastWinner: null };
-  }
+  try { return JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')); }
+  catch { return { entries: [], lastWinner: null }; }
 }
 function saveData(db) {
   fs.writeFileSync(DATA_FILE, JSON.stringify(db, null, 2));
@@ -46,24 +45,6 @@ function saveData(db) {
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
-
-// ─── AUTH HELPERS ────────────────────────────
-function isValidSuiAddress(addr) {
-  return typeof addr === 'string' && /^0x[a-fA-F0-9]{64}$/.test(addr);
-}
-function normalizeSuiAddress(addr) {
-  return addr.trim().toLowerCase();
-}
-function authenticate(req, res, next) {
-  const auth = req.headers.authorization;
-  if (!auth) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    req.user = jwt.verify(auth.split(' ')[1], JWT_SECRET);
-    next();
-  } catch {
-    res.status(401).json({ error: 'Invalid or expired token' });
-  }
-}
 
 // ─── GRAPHQL HOLDER FETCH ────────────────────
 async function fetchRafHolders() {
@@ -86,103 +67,71 @@ async function fetchRafHolders() {
     body: JSON.stringify({ query }),
   });
   const json = await resp.json();
-  if (json.errors) throw new Error(JSON.stringify(json.errors));
   if (!json.data || !Array.isArray(json.data.coinBalances)) {
-    throw new Error('Invalid GraphQL response shape');
+    throw new Error('Blast GraphQL returned unexpected data');
   }
   return json.data.coinBalances
     .map(c => ({
-      address: normalizeSuiAddress(c.ownerAddress),
-      count: Math.floor(Number(c.totalBalance) / MICROS_PER_TICKET),
+      address: c.ownerAddress.toLowerCase(),
+      count:   Math.floor(Number(c.totalBalance) / MICROS_PER_TICKET)
     }))
     .filter(e => e.count > 0);
 }
 
 // ─── ROUTES ──────────────────────────────────
 
-// 1) Issue JWT
-app.post('/api/auth', (req, res) => {
-  const { address } = req.body;
-  if (!address || !isValidSuiAddress(address)) {
-    return res.status(400).json({ error: 'Invalid Sui address' });
-  }
-  const token = jwt.sign({ address: normalizeSuiAddress(address) }, JWT_SECRET, { expiresIn: '1h' });
-  res.json({ token });
-});
-
-// 2) Proxy balance RPC
-app.post('/api/balance', authenticate, async (req, res) => {
-  try {
-    const rpcRes = await fetch(FULLNODE_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'suix_getAllBalances',
-        params: [ req.user.address ],
-      }),
-    });
-    return res.json(await rpcRes.json());
-  } catch (err) {
-    console.error('Balance proxy error:', err);
-    return res.status(502).json({ error: 'Fullnode RPC failed' });
-  }
-});
-
-// 3) List entries — always live + fallback
+// 1) List entries — always live, no fallback
 app.get('/api/entries', async (_req, res) => {
   try {
     const entries = await fetchRafHolders();
     return res.json({ entries });
   } catch (err) {
-    console.error('GraphQL failed, falling back to disk:', err);
-    const { entries } = loadData();
-    return res.json({ entries });
+    console.error('Failed to fetch from Blast:', err);
+    return res.status(500).json({ error: 'Could not fetch holders' });
   }
 });
 
-// 4) Get last winner
+// 2) Get last winner
 app.get('/api/last-winner', (_req, res) => {
   const { lastWinner } = loadData();
   res.json({ lastWinner });
 });
 
-// 5) Manual draw — no JWT required, only admin key
-app.post('/api/draw', async (req, res) => {
+// 3) Manual draw (admin only)
+app.post('/api/draw', (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
   }
-  let entries;
-  try {
-    entries = await fetchRafHolders();
-  } catch (err) {
-    console.error('GraphQL failed on manual draw, using disk:', err);
-    entries = loadData().entries;
-  }
-  const valid = entries.filter(e => e.count > 0);
-  if (!valid.length) {
-    return res.status(400).json({ error: 'No entries this round' });
-  }
-  const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-  const winner   = weighted[Math.floor(Math.random() * weighted.length)];
-  saveData({ entries: [], lastWinner: winner });
-  res.json({ winner });
+  // draw from the *latest* on-chain holders
+  fetchRafHolders()
+    .catch(err => {
+      console.error('Blast failed on manual draw:', err);
+      // fallback to disk if desired:
+      return loadData().entries;
+    })
+    .then(entries => {
+      const valid = entries.filter(e => e.count > 0);
+      if (!valid.length) return res.status(400).json({ error: 'No entries this round' });
+
+      const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
+      const winner   = weighted[Math.floor(Math.random()*weighted.length)];
+      saveData({ entries: [], lastWinner: winner });
+      res.json({ winner });
+    });
 });
 
-// 6) Cron auto-draw hourly 18–23
+// 4) Cron auto-draw hourly 18–23
 cron.schedule('0 18-23 * * *', async () => {
   let entries;
   try {
     entries = await fetchRafHolders();
-  } catch (err) {
-    console.error('GraphQL failed on cron, using disk:', err);
+  } catch {
     entries = loadData().entries;
   }
   const valid = entries.filter(e => e.count > 0);
   if (!valid.length) return;
   const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-  const winner   = weighted[Math.floor(Math.random() * weighted.length)];
+  const winner   = weighted[Math.floor(Math.random()*weighted.length)];
   console.log('🏆 Auto-draw winner:', winner);
   saveData({ entries: [], lastWinner: winner });
 });
@@ -196,5 +145,5 @@ app.use((err, _req, res, _next) => {
 
 // ─── START SERVER ───────────────────────────
 app.listen(PORT, () => {
-  console.log(`🚀 Server listening on port ${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
 });
