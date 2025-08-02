@@ -1,14 +1,7 @@
 // public/app.js
 
 document.addEventListener('DOMContentLoaded', () => {
-  // ─── CONFIG ────────────────────────────────
-  const DECIMALS          = 10 ** 6;
-  const TOKENS_PER_TICKET = 1_000_000;
-  const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS;
-
-  let currentWinner = null;
-
-  // ─── UI REFS ───────────────────────────────
+  // ─── UI REFERENCES ─────────────────────────
   const entriesSection = document.getElementById('entriesSection');
   const entriesList    = document.getElementById('entriesList');
   const countEl        = document.getElementById('count');
@@ -16,6 +9,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const winnerBanner   = document.getElementById('winnerAnnouncement');
   const countdownEl    = document.getElementById('countdown');
   const validationMsg  = document.getElementById('validationMsg');
+
+  let currentWinner = null;
 
   // ─── HELPERS ───────────────────────────────
   function showWinner(addr) {
@@ -30,12 +25,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadEntries() {
     entriesList.innerHTML = '';
+    countEl.textContent = '';
     try {
       const res = await fetch('/api/entries');
       if (!res.ok) throw new Error(`Status ${res.status}`);
       const { entries } = await res.json();
       let total = 0;
-      entriesList.innerHTML = entries.map((e,i) => {
+      entriesList.innerHTML = entries.map((e, i) => {
         total += e.count;
         return `<li>${i+1}. ${e.address} — ${e.count} tickets</li>`;
       }).join('');
@@ -65,17 +61,25 @@ document.addEventListener('DOMContentLoaded', () => {
   function getNextDraw() {
     const now = new Date();
     return [18,19,20,21,22,23]
-      .map(h => { const d = new Date(now); d.setHours(h,0,0,0); if (d<=now) d.setDate(d.getDate()+1); return d; })
-      .reduce((a,b) => a<b?a:b);
+      .map(h => {
+        const d = new Date(now);
+        d.setHours(h, 0, 0, 0);
+        if (d <= now) d.setDate(d.getDate() + 1);
+        return d;
+      })
+      .reduce((a, b) => a < b ? a : b);
   }
 
   function startCountdown() {
     function tick() {
       const diff = getNextDraw() - Date.now();
-      if (diff <= 0) { loadEntries(); return; }
-      const h = String(Math.floor(diff/3600000)).padStart(2,'0');
-      const m = String(Math.floor((diff%3600000)/60000)).padStart(2,'0');
-      const s = String(Math.floor((diff%60000)/1000)).padStart(2,'0');
+      if (diff <= 0) {
+        loadEntries();
+        return;
+      }
+      const h = String(Math.floor(diff / 3600000)).padStart(2,'0');
+      const m = String(Math.floor((diff % 3600000) / 60000)).padStart(2,'0');
+      const s = String(Math.floor((diff % 60000) / 1000)).padStart(2,'0');
       countdownEl.textContent = `Next draw in: ${h}:${m}:${s}`;
     }
     tick();

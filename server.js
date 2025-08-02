@@ -8,7 +8,8 @@ const cors       = require('cors');
 const jwt        = require('jsonwebtoken');
 const fs         = require('fs');
 const cron       = require('node-cron');
-const fetch      = require('node-fetch');
+// <-- pull in default export from node-fetch v3:
+const fetch      = require('node-fetch').default;
 
 // ─── CONFIG ───────────────────────────────────
 const PORT              = process.env.PORT      || 3000;
@@ -16,7 +17,7 @@ const JWT_SECRET        = process.env.JWT_SECRET;
 const ADMIN_KEY         = process.env.ADMIN_KEY;
 const DATA_FILE         = process.env.DATA_FILE || './entries.json';
 
-// **Your Blast GraphQL endpoint hard-coded here:**
+// **Your Blast GraphQL endpoint:**
 const GRAPHQL_URL       = 'https://sui-mainnet.blastapi.io/5ddd79fb-2df9-47ec-9d94-b82198bd6f67';
 
 const FULLNODE_URL      = 'https://fullnode.mainnet.sui.io:443';
@@ -68,7 +69,7 @@ async function fetchRafHolders() {
   });
   const json = await resp.json();
   if (!json.data || !Array.isArray(json.data.coinBalances)) {
-    throw new Error('Blast GraphQL returned unexpected data');
+    throw new Error('Invalid GraphQL response');
   }
   return json.data.coinBalances
     .map(c => ({
@@ -80,39 +81,36 @@ async function fetchRafHolders() {
 
 // ─── ROUTES ──────────────────────────────────
 
-// 1) List entries — always live, no fallback
+// 1) List entries
 app.get('/api/entries', async (_req, res) => {
   try {
     const entries = await fetchRafHolders();
     return res.json({ entries });
   } catch (err) {
-    console.error('Failed to fetch from Blast:', err);
+    console.error('Blast fetch failed:', err);
     return res.status(500).json({ error: 'Could not fetch holders' });
   }
 });
 
-// 2) Get last winner
+// 2) Last winner
 app.get('/api/last-winner', (_req, res) => {
   const { lastWinner } = loadData();
   res.json({ lastWinner });
 });
 
-// 3) Manual draw (admin only)
+// 3) Manual draw
 app.post('/api/draw', (req, res) => {
-  if (req.headers['x-admin-key'] !== ADMIN_KEY) {
+  if (req.headers['x-admin-key'] !== ADMIN_KEY)
     return res.status(403).json({ error: 'Forbidden' });
-  }
-  // draw from the *latest* on-chain holders
+
   fetchRafHolders()
     .catch(err => {
-      console.error('Blast failed on manual draw:', err);
-      // fallback to disk if desired:
+      console.error('Fetch on draw failed, using disk:', err);
       return loadData().entries;
     })
     .then(entries => {
       const valid = entries.filter(e => e.count > 0);
       if (!valid.length) return res.status(400).json({ error: 'No entries this round' });
-
       const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
       const winner   = weighted[Math.floor(Math.random()*weighted.length)];
       saveData({ entries: [], lastWinner: winner });
@@ -120,24 +118,21 @@ app.post('/api/draw', (req, res) => {
     });
 });
 
-// 4) Cron auto-draw hourly 18–23
+// 4) Cron auto-draw 18–23
 cron.schedule('0 18-23 * * *', async () => {
   let entries;
-  try {
-    entries = await fetchRafHolders();
-  } catch {
-    entries = loadData().entries;
-  }
+  try { entries = await fetchRafHolders(); }
+  catch { entries = loadData().entries; }
   const valid = entries.filter(e => e.count > 0);
   if (!valid.length) return;
   const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
   const winner   = weighted[Math.floor(Math.random()*weighted.length)];
-  console.log('🏆 Auto-draw winner:', winner);
+  console.log('🏆 Auto draw:', winner);
   saveData({ entries: [], lastWinner: winner });
 });
 
 // ─── STATIC & ERROR HANDLER ─────────────────
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname,'public')));
 app.use((err, _req, res, _next) => {
   console.error('Unhandled error:', err);
   res.status(500).json({ error: 'Internal server error' });
@@ -145,5 +140,5 @@ app.use((err, _req, res, _next) => {
 
 // ─── START SERVER ───────────────────────────
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Listening on http://localhost:${PORT}`);
 });
