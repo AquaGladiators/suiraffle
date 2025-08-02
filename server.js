@@ -65,40 +65,53 @@ function authenticate(req, res, next) {
 // ─── GRAPHQL FETCH ───────────────────────────
 async function fetchRafHolders() {
   const query = `
-    query {
-      rafBalances: coinBalances(
-        where: { coinType: "${RAF_TYPE}", totalBalance_gt: "0" }
-      ) {
-        ownerAddress
-        totalBalance
+  query {
+    allBalances(
+      filter: {
+        coinType: { eq: "${RAF_TYPE}" },
+        totalBalance: { gt: "0" }
+      }
+    ) {
+      edges {
+        node {
+          ownerAddress
+          totalBalance
+        }
       }
     }
-  `;
+  }`;
+
   const resp = await fetch(GRAPHQL_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query })
+    body: JSON.stringify({ query }),
   });
   const json = await resp.json();
   if (json.errors) {
     console.error('GraphQL errors:', json.errors);
     throw new Error('GraphQL returned errors');
   }
-  if (!json.data || !Array.isArray(json.data.rafBalances)) {
+  const edges = json.data?.allBalances?.edges;
+  if (!Array.isArray(edges)) {
     console.error('Unexpected GraphQL response shape:', json);
     throw new Error('Invalid GraphQL response');
   }
-  return json.data.rafBalances;
+  return edges.map(e => ({
+    ownerAddress: e.node.ownerAddress,
+    totalBalance: e.node.totalBalance,
+  }));
 }
 
 // ─── AUTO‐ENTER HOLDERS ──────────────────────
 async function autoEnterHolders() {
   const holders = await fetchRafHolders();
-  const entries = holders.map(h => {
-    const raw     = Number(h.totalBalance);
-    const tickets = Math.floor(raw / MICROS_PER_TICKET);
-    return { address: normalizeSuiAddress(h.ownerAddress), count: tickets };
-  }).filter(e => e.count > 0);
+  const entries = holders
+    .map(h => {
+      const raw = Number(h.totalBalance);
+      const tickets = Math.floor(raw / MICROS_PER_TICKET);
+      return { address: normalizeSuiAddress(h.ownerAddress), count: tickets };
+    })
+    .filter(e => e.count > 0);
 
   const db = loadData();
   db.entries = entries;
@@ -130,7 +143,7 @@ app.post('/api/balance', authenticate, async (req, res) => {
       body: JSON.stringify({
         jsonrpc: '2.0', id: 1,
         method: 'suix_getAllBalances',
-        params: [ req.user.address ],
+        params: [req.user.address],
       }),
     });
     const jr = await rpcRes.json();
@@ -141,24 +154,25 @@ app.post('/api/balance', authenticate, async (req, res) => {
   }
 });
 
-// 3) Manual enter (still available)
+// 3) Manual enter route
 app.post('/api/enter', authenticate, (req, res) => {
   const { address: bodyAddr, count } = req.body;
   const addr = req.user.address;
   if (bodyAddr !== addr) return res.status(400).json({ error: 'Address mismatch' });
-  if (!Number.isInteger(count) || count < 1)
+  if (!Number.isInteger(count) || count < 1) {
     return res.status(400).json({ error: 'Invalid ticket count' });
+  }
 
   const db = loadData();
-  if (db.entries.find(e => e.address === addr))
-    return res.status(400).json({ error: 'Already entered' });
-
+  if (db.entries.find(e => e.address === addr)) {
+    return res.status(400).json({ error: 'Already entered this round' });
+  }
   db.entries.push({ address: addr, count });
   saveData({ entries: db.entries, lastWinner: db.lastWinner });
-  res.json({ success: true, total: db.entries.reduce((s,e) => s + e.count, 0) });
+  res.json({ success: true, total: db.entries.reduce((s, e) => s + e.count, 0) });
 });
 
-// 4) List entries (auto‐enters holders first)
+// 4) List entries (auto‐enter holders first)
 app.get('/api/entries', async (_req, res) => {
   try {
     await autoEnterHolders();
@@ -169,13 +183,13 @@ app.get('/api/entries', async (_req, res) => {
   res.json({ entries: db.entries });
 });
 
-// 5) Last winner
+// 5) Get last winner
 app.get('/api/last-winner', (_req, res) => {
   const db = loadData();
   res.json({ lastWinner: db.lastWinner });
 });
 
-// 6) Draw winner
+// 6) Draw a winner
 app.post('/api/draw', async (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
@@ -184,10 +198,11 @@ app.post('/api/draw', async (req, res) => {
     await autoEnterHolders();
     const db = loadData();
     const valid = db.entries.filter(e => e.count > 0);
-    if (!valid.length) return res.status(400).json({ error: 'No entries' });
+    if (valid.length === 0) return res.status(400).json({ error: 'No entries this round' });
 
     const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
     const winner = weighted[Math.floor(Math.random() * weighted.length)];
+
     saveData({ entries: [], lastWinner: winner });
     res.json({ winner });
   } catch (err) {
@@ -196,23 +211,24 @@ app.post('/api/draw', async (req, res) => {
   }
 });
 
-// 7) Cron auto‐draw
+// 7) Cron auto‐draw hourly 18–23
 cron.schedule('0 18-23 * * *', async () => {
   try {
     await autoEnterHolders();
     const db = loadData();
     const valid = db.entries.filter(e => e.count > 0);
-    if (!valid.length) return;
+    if (valid.length === 0) return;
+
     const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
     const winner = weighted[Math.floor(Math.random() * weighted.length)];
-    console.log('🏆 Cron winner:', winner);
+    console.log('🏆 Cron auto‐draw winner:', winner);
     saveData({ entries: [], lastWinner: winner });
   } catch (err) {
-    console.error('Cron error:', err);
+    console.error('Cron draw error:', err);
   }
 });
 
-// ─── STATIC & ERROR HANDLER ─────────────────
+// ─── STATIC FILES & ERROR HANDLER ──────────
 app.use(express.static(path.join(__dirname, 'public')));
 app.use((err, _req, res, _next) => {
   console.error('Unhandled error:', err);
