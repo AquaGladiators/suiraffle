@@ -101,21 +101,46 @@ async function fetchRafHolders() {
   }));
 }
 
-// ─── AUTO‐ENTER HOLDERS ──────────────────────
-async function autoEnterHolders() {
+// ─── OVERWRITE entries.json ─────────────────
+async function updateEntriesFile() {
   const holders = await fetchRafHolders();
   const entries = holders
     .map(h => {
-      const raw = Number(h.totalBalance);
+      const raw     = Number(h.totalBalance);
       const tickets = Math.floor(raw / MICROS_PER_TICKET);
       return { address: normalizeSuiAddress(h.ownerAddress), count: tickets };
     })
     .filter(e => e.count > 0);
-
   const db = loadData();
-  db.entries = entries;
-  saveData(db);
+  saveData({ entries, lastWinner: db.lastWinner });
+  console.log(`✅ entries.json overwritten with ${entries.length} holders`);
 }
+
+// ─── Cron: DAILY at midnight ─────────────────
+cron.schedule('0 0 * * *', async () => {
+  try {
+    await updateEntriesFile();
+  } catch (e) {
+    console.error('❌ Failed daily entries update:', e);
+  }
+});
+
+// ─── Cron: HOURLY DRAWS 18-23 ────────────────
+cron.schedule('0 18-23 * * *', async () => {
+  try {
+    await updateEntriesFile();
+    const db = loadData();
+    if (!db.entries.length) return;
+
+    const weighted = db.entries.flatMap(e => Array(e.count).fill(e.address));
+    const winner   = weighted[Math.floor(Math.random() * weighted.length)];
+    console.log('🏆 Auto-draw winner:', winner);
+
+    saveData({ entries: [], lastWinner: winner });
+  } catch (e) {
+    console.error('❌ Cron draw failed:', e);
+  }
+});
 
 // ─── ROUTES ──────────────────────────────────
 
@@ -145,8 +170,7 @@ app.post('/api/balance', authenticate, async (req, res) => {
         params: [req.user.address],
       }),
     });
-    const jr = await rpcRes.json();
-    res.json(jr);
+    res.json(await rpcRes.json());
   } catch (err) {
     console.error('Balance proxy error:', err);
     res.status(502).json({ error: 'Fullnode RPC failed' });
@@ -163,63 +187,47 @@ app.post('/api/enter', authenticate, (req, res) => {
   }
   const db = loadData();
   if (db.entries.find(e => e.address === addr)) {
-    return res.status(400).json({ error: 'Already entered' });
+    return res.status(400).json({ error: 'Already entered this round' });
   }
   db.entries.push({ address: addr, count });
   saveData({ entries: db.entries, lastWinner: db.lastWinner });
   res.json({ success: true, total: db.entries.reduce((s, e) => s + e.count, 0) });
 });
 
-// 4) List entries (auto‐enter holders first)
-app.get('/api/entries', async (_req, res) => {
-  try {
-    await autoEnterHolders();
-  } catch (err) {
-    console.error('autoEnterHolders failed:', err);
-  }
-  const db = loadData();
-  res.json({ entries: db.entries });
+// 4) List entries
+app.get('/api/entries', (_req, res) => {
+  const { entries } = loadData();
+  res.json({ entries });
 });
 
 // 5) Get last winner
 app.get('/api/last-winner', (_req, res) => {
-  const db = loadData();
-  res.json({ lastWinner: db.lastWinner });
+  res.json({ lastWinner: loadData().lastWinner });
 });
 
-// 6) Draw a winner (manual) — **no longer calls autoEnterHolders**
-app.post('/api/draw', (req, res) => {
+// 6) Manual draw (now refresh before draw)
+app.post('/api/draw', async (req, res) => {
   if (req.headers['x-admin-key'] !== ADMIN_KEY) {
     return res.status(403).json({ error: 'Forbidden' });
   }
+  try {
+    await updateEntriesFile();
+  } catch (err) {
+    console.error('Failed to refresh holders before manual draw:', err);
+    // fall back to existing entries
+  }
   const db = loadData();
   const valid = db.entries.filter(e => e.count > 0);
-  if (valid.length === 0) {
+  if (!valid.length) {
     return res.status(400).json({ error: 'No entries this round' });
   }
   const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-  const winner = weighted[Math.floor(Math.random() * weighted.length)];
+  const winner   = weighted[Math.floor(Math.random() * weighted.length)];
   saveData({ entries: [], lastWinner: winner });
   res.json({ winner });
 });
 
-// 7) Cron auto‐draw hourly 18–23
-cron.schedule('0 18-23 * * *', async () => {
-  try {
-    await autoEnterHolders();
-    const db = loadData();
-    const valid = db.entries.filter(e => e.count > 0);
-    if (valid.length === 0) return;
-    const weighted = valid.flatMap(e => Array(e.count).fill(e.address));
-    const winner = weighted[Math.floor(Math.random() * weighted.length)];
-    console.log('🏆 Cron auto‐draw winner:', winner);
-    saveData({ entries: [], lastWinner: winner });
-  } catch (err) {
-    console.error('Cron draw error:', err);
-  }
-});
-
-// ─── STATIC FILES & ERROR HANDLER ──────────
+// ─── STATIC & ERROR HANDLER ─────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 app.use((err, _req, res, _next) => {
   console.error('Unhandled error:', err);
