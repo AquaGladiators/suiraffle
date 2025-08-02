@@ -13,7 +13,7 @@ const fetch      = require('node-fetch').default;
 const PORT        = process.env.PORT      || 3000;
 const ADMIN_KEY   = process.env.ADMIN_KEY;
 const DATA_FILE   = process.env.DATA_FILE || './entries.json';
-// Official Sui GraphQL RPC
+// Default to Sui’s public GraphQL RPC if no env var provided:
 const GRAPHQL_URL = process.env.SUI_INDEXER_GRAPHQL || 'https://sui-mainnet.mystenlabs.com/graphql';
 
 if (!ADMIN_KEY) {
@@ -69,6 +69,7 @@ async function fetchRafHolders() {
         }
       }
     `;
+
     const resp = await fetch(GRAPHQL_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -76,15 +77,17 @@ async function fetchRafHolders() {
     });
 
     const { data, errors } = await resp.json();
-    if (errors?.length) {
-      console.error('GraphQL errors:', errors);
-      throw new Error('GraphQL error');
+
+    // If GraphQL returns errors, bail out to disk fallback
+    if (errors) {
+      console.warn('GraphQL errors (ignoring and falling back):', errors);
+      return [];
     }
 
     const page = data?.coinBalances;
     if (!page?.nodes) {
-      console.error('Unexpected GraphQL response shape:', data);
-      throw new Error('Invalid GraphQL response shape');
+      console.warn('Unexpected GraphQL shape, falling back to disk:', data);
+      return [];
     }
 
     // Tally each holder
@@ -96,10 +99,12 @@ async function fetchRafHolders() {
       }
     }
 
+    // Pagination break
     if (!page.pageInfo.hasNextPage) break;
     after = page.pageInfo.endCursor;
   }
 
+  // Convert to array format
   return Array.from(holders.entries()).map(([address, count]) => ({ address, count }));
 }
 
@@ -113,7 +118,7 @@ app.get('/api/entries', async (_req, res) => {
     saveData({ entries, lastWinner });
     return res.json({ entries });
   } catch (err) {
-    console.warn('GraphQL fetch failed, falling back to disk:', err);
+    console.warn('Fetch error, falling back to disk:', err);
     const { entries } = loadData();
     return res.json({ entries });
   }
