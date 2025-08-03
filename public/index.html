@@ -1,86 +1,104 @@
+<!-- index.html -->
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
-  <meta charset="UTF-8"/>
+  <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>SuiRaffle</title>
-  <link rel="icon" href="data:,">
+  <title>SuiRaffle 🎟️</title>
+  <link rel="icon" href="data:;base64,iVBORw0KGgo=">
 
-  <!-- Tailwind CSS -->
+  <!-- Tailwind + Custom -->
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="/styles.css">
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+  
+  <!-- tsParticles -->
   <script src="https://cdn.jsdelivr.net/npm/tsparticles@2.9.3/tsparticles.bundle.min.js"></script>
+  <!-- Confetti -->
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
 </head>
-<body class="bg-gray-100">
+<body class="bg-gradient-to-br from-gray-900 via-purple-900 to-black text-white overflow-x-hidden">
+
+  <!-- Particle Background -->
+  <div id="tsparticles" class="fixed inset-0 -z-10"></div>
 
   <!-- Navbar -->
-  <nav class="navbar">
-    <div class="navbar-container">
-      <div class="logo neon animate__animated animate__pulse animate__infinite">
-        SuiRaffle 🎟️
-      </div>
-      <div id="countdown" class="countdown">Next draw in: --:--:--</div>
-      <div id="winnerAnnouncement" class="winner-banner hidden"></div>
-      <div class="flex-1"></div>
-    </div>
+  <nav class="fixed top-0 left-0 w-full backdrop-blur-md bg-black/20 px-6 py-4 flex items-center space-x-4 z-20">
+    <h1 class="text-2xl font-extrabold tracking-wide neon-text animate-pulse">SuiRaffle</h1>
+    <div id="countdown" class="ml-auto font-mono bg-white/10 px-3 py-1 rounded-lg"></div>
+    <div id="winnerAnnouncement" class="ml-4 bg-green-400/20 text-green-300 px-3 py-1 rounded-lg hidden"></div>
   </nav>
 
-  <!-- Background Particles -->
-  <div id="tsparticles" class="background"></div>
-
-  <div class="main-container">
-    <!-- Sidebar: Last 5 Winners -->
-    <aside class="sidebar">
-      <h2>Last 5 Winners</h2>
-      <ul id="winnersList" class="winner-list"></ul>
+  <div class="pt-24 max-w-7xl mx-auto px-4 flex gap-8">
+    <!-- Sidebar -->
+    <aside class="w-64 space-y-4">
+      <h2 class="text-xl font-bold">Last 5 Winners</h2>
+      <ul id="winnersList" class="space-y-2 text-gray-300 list-decimal list-inside"></ul>
     </aside>
 
     <!-- Main Card -->
-    <main class="card">
-      <input id="addressInput" type="text" placeholder="Paste your Sui wallet address (0x…)" class="input-field"/>
-      <p id="validationMsg" class="error-text"></p>
+    <main class="flex-1 bg-white/5 backdrop-blur-lg rounded-2xl p-8 shadow-xl space-y-6">
+      <div class="space-y-1">
+        <input id="addressInput" type="text" placeholder="0x… your Sui address" class="w-full px-4 py-3 rounded-xl bg-white/10 placeholder-gray-400 text-white focus:outline-none focus:ring-2 focus:ring-purple-500 transition" />
+        <p id="validationMsg" class="text-red-400 text-sm h-5"></p>
+      </div>
+      <button id="authBtn" class="w-full py-3 bg-purple-600 hover:bg-purple-500 rounded-xl font-semibold transition" disabled>
+        Authenticate & Check Balance
+      </button>
 
-      <button id="authBtn" disabled class="btn btn-primary">Authenticate & Check Balance</button>
-
-      <div id="balanceSection" class="balance-section hidden">
-        <p id="balanceMsg" class="balance-text"></p>
-        <p id="entryCountMsg" class="entry-text"></p>
-        <button id="enterBtn" disabled class="btn btn-success">Enter Raffle</button>
+      <div id="balanceSection" class="hidden space-y-2">
+        <p id="balanceMsg" class="font-mono text-lg"></p>
+        <p id="entryCountMsg" class="font-semibold"></p>
+        <button id="enterBtn" class="w-full py-3 bg-green-600 hover:bg-green-500 rounded-xl font-semibold transition" disabled>
+          Enter Raffle
+        </button>
       </div>
 
-      <div id="entriesSection" class="entries-section hidden">
-        <p id="count" class="count-text"></p>
-        <ul id="entriesList" class="entries-list"></ul>
+      <div id="entriesSection" class="hidden space-y-2">
+        <p id="count" class="font-mono"></p>
+        <ul id="entriesList" class="max-h-48 overflow-y-auto space-y-1 text-gray-300"></ul>
       </div>
 
-      <!-- Draw Winner -->
-      <div class="mt-4">
-        <button id="drawBtn" class="btn btn-danger">Draw Winner</button>
-      </div>
+      <a href="https://moonbags.io/bondingcurve/coins/sui-raffle-sui-VvyRVXFykG" target="_blank"
+         class="inline-block px-6 py-3 bg-pink-600 hover:bg-pink-500 rounded-full font-semibold transition">
+        Buy Raffle Tokens
+      </a>
 
-      <!-- Buy Raffle Tokens: hidden until you win -->
-      <div class="mt-4">
-        <a id="buyBtn"
-           href="https://moonbags.io/bondingcurve/coins/sui-raffle-sui-VvyRVXFykG"
-           target="_blank"
-           class="btn btn-primary hidden">
-          Buy Raffle Tokens
+      <button id="drawBtn" class="w-full py-3 bg-red-600 hover:bg-red-500 rounded-xl font-semibold transition">
+        Draw Winner
+      </button>
+
+      <!-- Latest Tweet -->
+      <section class="pt-6 border-t border-white/20">
+        <h3 class="text-lg font-bold mb-2">Latest Tweet by @sui_raffle</h3>
+        <a
+          class="twitter-timeline"
+          href="https://twitter.com/sui_raffle?ref_src=twsrc%5Etfw"
+          data-tweet-limit="1"
+          data-chrome="noheader nofooter noborders transparent noscrollbar"
+          data-theme="dark"
+          data-width="100%"
+        >
+          Tweets by @sui_raffle
         </a>
-      </div>
-
-      <!-- Latest Tweet Embed -->
-      <section class="mt-8 text-center">
-        <h3 class="text-xl font-semibold mb-4">Latest Tweet by @sui_raffle</h3>
-        <blockquote class="twitter-tweet">
-          <a href="https://twitter.com/sui_raffle/status/STATUS_ID"></a>
-        </blockquote>
-        <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
       </section>
     </main>
   </div>
 
+  <!-- Scripts -->
+  <script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>
   <script src="/app.js"></script>
+  <script>
+    // particles config
+    tsParticles.load('tsparticles', {
+      fpsLimit: 60,
+      particles: {
+        number: { value: 120 },
+        color: { value: ['#ff79c6', '#8be9fd', '#50fa7b'] },
+        links: { enable: true, distance: 150, color: '#fff', opacity: 0.1 },
+        move: { enable: true, speed: 1 },
+        size: { value: { min: 1, max: 3 } },
+      },
+    });
+  </script>
 </body>
 </html>

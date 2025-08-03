@@ -8,7 +8,7 @@ const cors = require('cors');
 const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const cron = require('node-cron');
-const fetch = require('node-fetch');
+const fetch = require('node-fetch').default;
 
 // ─── CONFIG ───────────────────────────────────
 const PORT               = process.env.PORT       || 3000;
