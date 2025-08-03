@@ -19,9 +19,9 @@ document.addEventListener('DOMContentLoaded', () => {
   // ─── CONFIG ───────────────────────────────────
   const DECIMALS          = 10 ** 6;             // RAF has 6 decimals
   const TOKENS_PER_TICKET = 1_000_000;           // 1,000,000 RAF per ticket
-  const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // 1e12 microunits
-  const DRAW_HOURS        = [9,11,13,15,17,19,21]; // every 2h from 9 to 21
+  const MICROS_PER_TICKET = TOKENS_PER_TICKET * DECIMALS; // = 1e12 microunits
   let jwtToken            = null;
+  let currentWinner       = null;
 
   // ─── UI ELEMENTS ─────────────────────────────
   const addrInput      = document.getElementById('addressInput');
@@ -52,23 +52,10 @@ document.addEventListener('DOMContentLoaded', () => {
     wins.unshift(addr);
     localStorage.setItem('winners', JSON.stringify(wins.slice(0,5)));
   }
-
   function updateLastWinners() {
-    const wins = JSON.parse(localStorage.getItem('winners') || '[]');
-    const list = document.getElementById('winnersList');
-    list.innerHTML = wins.map((addr, idx) => {
-      const display = addr.length > 8
-        ? `${addr.slice(0,4)}…${addr.slice(-4)}`
-        : addr;
-      return `
-        <li>
-          ${idx+1}. ${display}
-          <button class="copy-btn" data-addr="${addr}" aria-label="Copy address">📋</button>
-        </li>
-      `;
-    }).join('');
+    const wins = JSON.parse(localStorage.getItem('winners') || '[]').slice(0,5);
+    winnersList.innerHTML = wins.map((w,i) => `<li>${i+1}. ${w}</li>`).join('');
   }
-
   async function loadEntries() {
     try {
       const res = await fetch('/api/entries');
@@ -85,18 +72,31 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ─── COPY BUTTON HANDLER ─────────────────────
-  winnersList.addEventListener('click', e => {
-    if (!e.target.matches('.copy-btn')) return;
-    const full = e.target.dataset.addr;
-    navigator.clipboard.writeText(full).then(() => {
-      const orig = e.target.textContent;
-      e.target.textContent = '✅';
-      setTimeout(() => { e.target.textContent = orig; }, 1500);
-    });
-  });
+  function getNextDraw() {
+    const now = new Date();
+    return [18,19,20,21,22,23]
+      .map(h => {
+        const d = new Date(now);
+        d.setHours(h,0,0,0);
+        if (d <= now) d.setDate(d.getDate()+1);
+        return d;
+      })
+      .reduce((a,b) => a < b ? a : b);
+  }
+  function startCountdown() {
+    function update() {
+      const diff = getNextDraw() - Date.now();
+      if (diff <= 0) { loadEntries(); return; }
+      const hrs  = String(Math.floor(diff/3600000)).padStart(2,'0');
+      const mins = String(Math.floor((diff%3600000)/60000)).padStart(2,'0');
+      const secs = String(Math.floor((diff%60000)/1000)).padStart(2,'0');
+      countdownEl.textContent = `Next draw in: ${hrs}:${mins}:${secs}`;
+    }
+    update();
+    setInterval(update, 1000);
+  }
 
-  // ─── DRAW ENTRY & AUTH ───────────────────────
+  // ─── EVENT LISTENERS ─────────────────────────
   addrInput.addEventListener('input', () => {
     validationMsg.textContent = '';
     authBtn.disabled = !/^0x[a-fA-F0-9]{64}$/.test(addrInput.value.trim());
@@ -108,6 +108,8 @@ document.addEventListener('DOMContentLoaded', () => {
   authBtn.addEventListener('click', async () => {
     const address = addrInput.value.trim();
     validationMsg.textContent = '';
+
+    // 1) Get JWT
     let res = await fetch('/api/auth', {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
@@ -121,6 +123,8 @@ document.addEventListener('DOMContentLoaded', () => {
     jwtToken = authData.token;
     authBtn.textContent = 'Authenticated';
     authBtn.disabled = true;
+
+    // 2) Fetch balance via proxy
     balanceMsg.textContent = '⏳ Fetching balance…';
     res = await fetch('/api/balance', {
       method: 'POST',
@@ -130,10 +134,18 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
     const jr = await res.json();
+
+    // 3) Find the RAF entry
     const arr = Array.isArray(jr.result) ? jr.result : [];
-    const rafEntries = arr.filter(c => c.coinType.toLowerCase().includes('::raf::raf'));
-    const raw  = rafEntries[0] ? Number(rafEntries[0].totalBalance) : 0;
-    balanceMsg.textContent = `💰 ${(raw/DECIMALS).toLocaleString()} RAF`;
+    const rafEntries = arr.filter(c =>
+      c.coinType.toLowerCase().includes('::raf::raf')
+    );
+    const coin = rafEntries[0];
+    const raw  = coin ? Number(coin.totalBalance) : 0;
+
+    // 4) Update UI
+    const human = raw / DECIMALS;
+    balanceMsg.textContent = `💰 ${human.toLocaleString()} RAF`;
     const tickets = Math.floor(raw / MICROS_PER_TICKET);
     entryCountMsg.textContent = tickets > 0
       ? `🎟️ ${tickets.toLocaleString()} tickets`
@@ -144,7 +156,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   enterBtn.addEventListener('click', async () => {
-    const count = +enterBtn.dataset.count;
+    const count = +enterBtn.dataset.count || 0;
     if (!count) return;
     const address = addrInput.value.trim();
     const res = await fetch('/api/enter', {
@@ -162,42 +174,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   drawBtn.addEventListener('click', async () => {
     const key = prompt('Admin Key');
-    const res = await fetch('/api/draw', { method: 'POST', headers: { 'x-admin-key': key } });
+    const res = await fetch('/api/draw', {
+      method: 'POST',
+      headers: { 'x-admin-key': key }
+    });
     const o = await res.json();
     if (o.winner) {
       confetti({ particleCount:200, spread:60 });
       showWinner(o.winner);
       saveWinner(o.winner);
       updateLastWinners();
+      // Clear participants immediately for new round
       loadEntries();
     } else {
       validationMsg.textContent = o.error;
     }
   });
-
-  // ─── NEXT DRAW CALC & COUNTDOWN ─────────────
-  function getNextDraw() {
-    const now = new Date();
-    return DRAW_HOURS.map(h => {
-      const d = new Date(now);
-      d.setHours(h,0,0,0);
-      if (d <= now) d.setDate(d.getDate()+1);
-      return d;
-    }).reduce((a,b) => a < b ? a : b);
-  }
-
-  function startCountdown() {
-    function update() {
-      const diff = getNextDraw() - Date.now();
-      if (diff <= 0) { loadEntries(); return; }
-      const hrs  = String(Math.floor(diff/3600000)).padStart(2,'0');
-      const mins = String(Math.floor((diff%3600000)/60000)).padStart(2,'0');
-      const secs = String(Math.floor((diff%60000)/1000)).padStart(2,'0');
-      countdownEl.textContent = `Next draw in: ${hrs}:${mins}:${secs}`;
-    }
-    update();
-    setInterval(update, 1000);
-  }
 
   // ─── INIT ─────────────────────────────────────
   setInterval(loadEntries, 60000);
